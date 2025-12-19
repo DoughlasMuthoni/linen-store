@@ -1,0 +1,27 @@
+# /linen-closet/.htaccess
+
+RewriteEngine On
+RewriteBase /linen-closet/
+
+# If installed in root, remove the line above and use:
+# RewriteBase /
+
+# Remove trailing slashes
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)/$ /$1 [L,R=301]
+
+# Front controller pattern - only for non-existing files/folders
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ index.php?url=$1 [QSA,L]
+
+# Security headers
+Header set X-Content-Type-Options "nosniff"
+Header set X-Frame-Options "SAMEORIGIN"
+Header set X-XSS-Protection "1; mode=block"
+
+# Prevent access to sensitive files
+<FilesMatch "\.(env|log|sql|ini|conf)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>

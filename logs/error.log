@@ -1,0 +1,90 @@
+[16-Dec-2025 13:03:09 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 47
+[16-Dec-2025 13:03:09 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 48
+[16-Dec-2025 13:03:09 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 49
+[16-Dec-2025 13:03:09 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 50
+[16-Dec-2025 13:03:09 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 51
+[16-Dec-2025 13:03:09 UTC] PHP Fatal error:  Uncaught Error: Call to undefined method App::generateCSRFToken() in C:\xampp_files\htdocs\linen-closet\includes\header.php:170
+Stack trace:
+#0 C:\xampp_files\htdocs\linen-closet\index.php(37): require_once()
+#1 {main}
+  thrown in C:\xampp_files\htdocs\linen-closet\includes\header.php on line 170
+[16-Dec-2025 13:03:09 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 47
+[16-Dec-2025 13:03:09 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 48
+[16-Dec-2025 13:03:09 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 49
+[16-Dec-2025 13:03:09 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 50
+[16-Dec-2025 13:03:09 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 51
+[16-Dec-2025 13:03:09 UTC] PHP Fatal error:  Uncaught Error: Call to undefined method App::generateCSRFToken() in C:\xampp_files\htdocs\linen-closet\includes\header.php:170
+Stack trace:
+#0 C:\xampp_files\htdocs\linen-closet\index.php(116): require_once()
+#1 {main}
+  thrown in C:\xampp_files\htdocs\linen-closet\includes\header.php on line 170
+[16-Dec-2025 13:03:55 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 47
+[16-Dec-2025 13:03:55 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 48
+[16-Dec-2025 13:03:55 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 49
+[16-Dec-2025 13:03:55 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 50
+[16-Dec-2025 13:03:55 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 51
+[16-Dec-2025 13:03:55 UTC] PHP Fatal error:  Uncaught Error: Call to undefined method App::generateCSRFToken() in C:\xampp_files\htdocs\linen-closet\includes\header.php:170
+Stack trace:
+#0 C:\xampp_files\htdocs\linen-closet\index.php(37): require_once()
+#1 {main}
+  thrown in C:\xampp_files\htdocs\linen-closet\includes\header.php on line 170
+[16-Dec-2025 13:03:55 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 47
+[16-Dec-2025 13:03:55 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 48
+[16-Dec-2025 13:03:55 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 49
+[16-Dec-2025 13:03:55 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 50
+[16-Dec-2025 13:03:55 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 51
+[16-Dec-2025 13:03:55 UTC] PHP Fatal error:  Uncaught Error: Call to undefined method App::generateCSRFToken() in C:\xampp_files\htdocs\linen-closet\includes\header.php:170
+Stack trace:
+#0 C:\xampp_files\htdocs\linen-closet\index.php(116): require_once()
+#1 {main}
+  thrown in C:\xampp_files\htdocs\linen-closet\includes\header.php on line 170
+[16-Dec-2025 13:03:56 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 47
+[16-Dec-2025 13:03:56 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 48
+[16-Dec-2025 13:03:56 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 49
+[16-Dec-2025 13:03:56 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 50
+[16-Dec-2025 13:03:56 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 51
+[16-Dec-2025 13:03:56 UTC] PHP Fatal error:  Uncaught Error: Call to undefined method App::generateCSRFToken() in C:\xampp_files\htdocs\linen-closet\includes\header.php:170
+Stack trace:
+#0 C:\xampp_files\htdocs\linen-closet\index.php(37): require_once()
+#1 {main}
+  thrown in C:\xampp_files\htdocs\linen-closet\includes\header.php on line 170
+[16-Dec-2025 13:03:56 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 47
+[16-Dec-2025 13:03:56 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 48
+[16-Dec-2025 13:03:56 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 49
+[16-Dec-2025 13:03:56 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 50
+[16-Dec-2025 13:03:56 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 51
+[16-Dec-2025 13:03:56 UTC] PHP Fatal error:  Uncaught Error: Call to undefined method App::generateCSRFToken() in C:\xampp_files\htdocs\linen-closet\includes\header.php:170
+Stack trace:
+#0 C:\xampp_files\htdocs\linen-closet\index.php(116): require_once()
+#1 {main}
+  thrown in C:\xampp_files\htdocs\linen-closet\includes\header.php on line 170
+[16-Dec-2025 13:04:04 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 47
+[16-Dec-2025 13:04:04 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 48
+[16-Dec-2025 13:04:04 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 49
+[16-Dec-2025 13:04:04 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 50
+[16-Dec-2025 13:04:04 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 51
+[16-Dec-2025 13:04:04 UTC] PHP Fatal error:  Uncaught Error: Call to undefined method App::generateCSRFToken() in C:\xampp_files\htdocs\linen-closet\includes\header.php:170
+Stack trace:
+#0 C:\xampp_files\htdocs\linen-closet\index.php(37): require_once()
+#1 {main}
+  thrown in C:\xampp_files\htdocs\linen-closet\includes\header.php on line 170
+[16-Dec-2025 13:04:04 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 47
+[16-Dec-2025 13:04:04 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 48
+[16-Dec-2025 13:04:04 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 49
+[16-Dec-2025 13:04:04 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 50
+[16-Dec-2025 13:04:04 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 51
+[16-Dec-2025 13:04:04 UTC] PHP Fatal error:  Uncaught Error: Call to undefined method App::generateCSRFToken() in C:\xampp_files\htdocs\linen-closet\includes\header.php:170
+Stack trace:
+#0 C:\xampp_files\htdocs\linen-closet\index.php(116): require_once()
+#1 {main}
+  thrown in C:\xampp_files\htdocs\linen-closet\includes\header.php on line 170
+[16-Dec-2025 13:04:04 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 47
+[16-Dec-2025 13:04:04 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 48
+[16-Dec-2025 13:04:04 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 49
+[16-Dec-2025 13:04:04 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 50
+[16-Dec-2025 13:04:04 UTC] PHP Warning:  ini_set(): Session ini settings cannot be changed when a session is active in C:\xampp_files\htdocs\linen-closet\includes\config.php on line 51
+[16-Dec-2025 13:04:04 UTC] PHP Fatal error:  Uncaught Error: Call to undefined method App::generateCSRFToken() in C:\xampp_files\htdocs\linen-closet\includes\header.php:170
+Stack trace:
+#0 C:\xampp_files\htdocs\linen-closet\index.php(116): require_once()
+#1 {main}
+  thrown in C:\xampp_files\htdocs\linen-closet\includes\header.php on line 170

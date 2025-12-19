@@ -1,0 +1,250 @@
+/* /linen-closet/assets/css/admin.css */
+
+/* Admin Layout */
+.admin-sidebar {
+    transition: width 0.3s;
+    z-index: 1000;
+}
+
+.admin-main {
+    transition: margin-left 0.3s;
+    min-height: 100vh;
+}
+
+.admin-header {
+    z-index: 999;
+}
+
+.sidebar-nav .nav-link {
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    margin-bottom: 0.25rem;
+    transition: all 0.3s;
+}
+
+.sidebar-nav .nav-link:hover {
+    background-color: rgba(255,255,255,0.1);
+}
+
+.sidebar-nav .nav-link.active {
+    background-color: var(--primary-color);
+    color: white !important;
+}
+
+/* Cards */
+.card {
+    border: none;
+    border-radius: 10px;
+}
+
+.card-header {
+    border-bottom: 1px solid rgba(0,0,0,0.1);
+    background-color: white;
+}
+
+/* Stats Cards */
+.border-left-primary {
+    border-left: 4px solid #4e73df !important;
+}
+
+.border-left-success {
+    border-left: 4px solid #1cc88a !important;
+}
+
+.border-left-info {
+    border-left: 4px solid #36b9cc !important;
+}
+
+.border-left-warning {
+    border-left: 4px solid #f6c23e !important;
+}
+
+/* Tables */
+.table th {
+    font-weight: 600;
+    color: #5a5c69;
+    border-top: none;
+}
+
+.table td {
+    vertical-align: middle;
+}
+
+/* Forms */
+.form-control:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+}
+
+/* Buttons */
+.btn {
+    border-radius: 6px;
+    font-weight: 500;
+}
+
+.btn-group-sm > .btn {
+    border-radius: 4px;
+}
+
+/* Badges */
+.badge {
+    font-weight: 500;
+    padding: 0.35em 0.65em;
+}
+
+/* Charts */
+.chart-area {
+    position: relative;
+    height: 300px;
+    width: 100%;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .admin-sidebar {
+        width: 70px !important;
+    }
+    
+    .admin-sidebar .sidebar-header h4 span,
+    .admin-sidebar .sidebar-user div:last-child,
+    .admin-sidebar .nav-link span {
+        display: none;
+    }
+    
+    .admin-sidebar .sidebar-header h4 {
+        text-align: center;
+    }
+    
+    .admin-sidebar .nav-link {
+        justify-content: center;
+        padding: 0.75rem;
+    }
+    
+    .admin-sidebar .nav-link i {
+        margin-right: 0;
+        font-size: 1.2rem;
+    }
+    
+    .admin-main {
+        margin-left: 70px !important;
+    }
+}
+
+/* Image upload preview */
+.image-preview-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.image-preview {
+    position: relative;
+    width: 100px;
+    height: 100px;
+}
+
+.image-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 6px;
+}
+
+.image-preview-remove {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #dc3545;
+    color: white;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+/* Variant items */
+.variant-item {
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+}
+
+.variant-item:last-child {
+    margin-bottom: 0 !important;
+}
+
+/* Color picker */
+.form-control-color {
+    height: 38px;
+    padding: 2px;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+}
+
+/* Select2 customization */
+.select2-container--bootstrap-5 .select2-selection {
+    min-height: 38px;
+    border-color: #dee2e6;
+}
+
+.select2-container--bootstrap-5 .select2-selection:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+}
+
+/* DataTables customization */
+.dataTables_wrapper .dataTables_length,
+.dataTables_wrapper .dataTables_filter,
+.dataTables_wrapper .dataTables_info,
+.dataTables_wrapper .dataTables_processing,
+.dataTables_wrapper .dataTables_paginate {
+    padding: 1rem;
+}
+
+.dataTables_wrapper .dataTables_paginate .paginate_button {
+    border-radius: 4px !important;
+    margin: 0 2px;
+}
+
+/* Switch toggle */
+.form-switch .form-check-input {
+    width: 3em;
+    height: 1.5em;
+}
+
+.form-switch .form-check-input:checked {
+    background-color: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+/* Loading overlay */
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+}
+
+.loading-spinner {
+    width: 50px;
+    height: 50px;
+    border: 5px solid #f3f3f3;
+    border-top: 5px solid var(--primary-color);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}

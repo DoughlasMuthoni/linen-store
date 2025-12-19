@@ -1,0 +1,444 @@
+/* Frontend Product Styles */
+.product-card {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.product-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1) !important;
+}
+
+.product-image {
+    transition: transform 0.5s ease;
+}
+
+.product-card:hover .product-image {
+    transform: scale(1.05);
+}
+
+.product-overlay {
+    transition: opacity 0.3s ease;
+    background: linear-gradient(transparent, rgba(0,0,0,0.1));
+}
+
+.product-card:hover .product-overlay {
+    opacity: 1 !important;
+}
+
+/* Text truncation */
+.text-truncate-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.text-truncate-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* Image handling */
+.object-fit-cover {
+    object-fit: cover;
+}
+
+.object-fit-contain {
+    object-fit: contain;
+}
+
+/* Badge animations */
+.badge {
+    transition: transform 0.2s ease;
+}
+
+.badge:hover {
+    transform: scale(1.05);
+}
+
+/* Button animations */
+.btn {
+    transition: all 0.3s ease;
+}
+
+.btn:hover {
+    transform: translateY(-2px);
+}
+
+/* Loading animations */
+.loading-spinner {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Fade animations */
+.fade-in {
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* Slide animations */
+.slide-in-up {
+    animation: slideInUp 0.3s ease;
+}
+
+@keyframes slideInUp {
+    from {
+        transform: translateY(20px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+/* Quantity selector */
+.quantity-selector input[type="number"] {
+    -moz-appearance: textfield;
+}
+
+.quantity-selector input[type="number"]::-webkit-outer-spin-button,
+.quantity-selector input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+/* Rating stars */
+.rating i {
+    transition: color 0.2s ease;
+}
+
+/* Filter animations */
+.filter-option {
+    transition: all 0.2s ease;
+}
+
+.filter-option:hover {
+    background-color: #f8f9fa !important;
+}
+
+/* Mobile optimizations */
+@media (max-width: 768px) {
+    .product-card {
+        margin-bottom: 1rem;
+    }
+    
+    .product-card .card-img-top {
+        height: 200px;
+    }
+    
+    .sticky-sidebar {
+        position: static;
+        height: auto;
+    }
+}
+
+/* Cart animations */
+.cart-item-enter {
+    animation: slideInRight 0.3s ease;
+}
+
+@keyframes slideInRight {
+    from {
+        transform: translateX(20px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+.cart-item-exit {
+    animation: slideOutLeft 0.3s ease;
+}
+
+@keyframes slideOutLeft {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateX(-20px);
+        opacity: 0;
+    }
+}
+
+/* Price display */
+.price-old {
+    text-decoration: line-through;
+    opacity: 0.6;
+}
+
+.price-new {
+    color: #dc3545;
+    font-weight: bold;
+}
+
+/* Stock status */
+.stock-in {
+    color: #28a745;
+}
+
+.stock-low {
+    color: #ffc107;
+}
+
+.stock-out {
+    color: #dc3545;
+}
+
+/* Quick view modal */
+.quick-view-modal .modal-dialog {
+    max-width: 900px;
+}
+
+/* Wishlist button */
+.wishlist-btn.active {
+    color: #dc3545;
+}
+
+/* Compare button */
+.compare-btn.active {
+    color: #007bff;
+}
+
+/* Size selector */
+.size-option.active {
+    background-color: #000 !important;
+    color: white !important;
+    border-color: #000 !important;
+}
+
+/* Color selector */
+.color-option.active {
+    border: 2px solid #000 !important;
+    transform: scale(1.1);
+}
+
+/* Progress indicators */
+.progress-step.active {
+    background-color: #000;
+    color: white;
+}
+
+.progress-step.completed {
+    background-color: #28a745;
+    color: white;
+}
+
+/* Tooltips */
+.custom-tooltip {
+    position: relative;
+    display: inline-block;
+}
+
+.custom-tooltip .tooltip-text {
+    visibility: hidden;
+    background-color: #333;
+    color: white;
+    text-align: center;
+    padding: 5px 10px;
+    border-radius: 4px;
+    position: absolute;
+    z-index: 1;
+    bottom: 125%;
+    left: 50%;
+    transform: translateX(-50%);
+    opacity: 0;
+    transition: opacity 0.3s;
+    white-space: nowrap;
+}
+
+.custom-tooltip:hover .tooltip-text {
+    visibility: visible;
+    opacity: 1;
+}
+
+/* Toast notifications */
+.toast-notification {
+    animation: slideInUp 0.3s ease, fadeOut 0.3s ease 2.7s;
+}
+
+@keyframes fadeOut {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+
+/* Load more button animation */
+.load-more-loading {
+    position: relative;
+}
+
+.load-more-loading:after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 20px;
+    height: 20px;
+    margin: -10px 0 0 -10px;
+    border: 2px solid #fff;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+/* Image zoom on hover */
+.image-zoom-container {
+    overflow: hidden;
+    position: relative;
+}
+
+.image-zoom-container img {
+    transition: transform 0.5s ease;
+}
+
+.image-zoom-container:hover img {
+    transform: scale(1.1);
+}
+
+/* Floating action buttons */
+.fab {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    z-index: 1000;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+}
+
+/* Back to top button */
+.back-to-top {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    z-index: 1000;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.back-to-top.visible {
+    opacity: 1;
+}
+
+/* Countdown timer */
+.countdown-timer {
+    font-family: monospace;
+    font-weight: bold;
+}
+
+/* Ribbon badges */
+.ribbon {
+    position: absolute;
+    top: 10px;
+    right: -5px;
+    padding: 5px 15px;
+    color: white;
+    font-weight: bold;
+    z-index: 1;
+}
+
+.ribbon:before {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 100%;
+    border-width: 15px 10px;
+    border-style: solid;
+}
+
+.ribbon-sale {
+    background-color: #dc3545;
+}
+
+.ribbon-sale:before {
+    border-color: transparent #dc3545 transparent transparent;
+}
+
+.ribbon-new {
+    background-color: #28a745;
+}
+
+.ribbon-new:before {
+    border-color: transparent #28a745 transparent transparent;
+}
+
+.ribbon-featured {
+    background-color: #007bff;
+}
+
+.ribbon-featured:before {
+    border-color: transparent #007bff transparent transparent;
+}
+
+/* Product badges */
+.product-badge {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 1;
+}
+
+/* Shipping progress */
+.shipping-progress {
+    height: 4px;
+    background-color: #e9ecef;
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.shipping-progress-bar {
+    height: 100%;
+    background-color: #28a745;
+    transition: width 0.3s ease;
+}
+
+/* Discount tag */
+.discount-tag {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background-color: #dc3545;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-weight: bold;
+    font-size: 12px;
+    z-index: 1;
+}
+
+/* Product labels */
+.product-label {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 12px;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.label-best-seller {
+    background-color: #ffc107;
+    color: #000;
+}
+
+.label-trending {
+    background-color: #17a2b8;
+    color: white;
+}
+
+.label-limited {
+    background-color: #dc3545;
+    color: white;
+}
