@@ -64,21 +64,22 @@ try {
 // Fetch featured categories
 $categories = [];
 try {
-    $stmt = $db->prepare("
-        SELECT 
-            c.id,
-            c.name,
-            c.slug,
-            c.image_url,
-            c.description,
-            COUNT(p.id) as product_count
-        FROM categories c
-        LEFT JOIN products p ON c.id = p.category_id AND p.is_active = 1
-        WHERE c.is_featured = 1 AND c.is_active = 1
-        GROUP BY c.id
-        ORDER BY c.sort_order, c.name
-        LIMIT 6
-    ");
+   $stmt = $db->prepare("
+    SELECT 
+        c.id,
+        c.name,
+        c.slug,
+        c.image_url,
+        c.description,
+        COUNT(p.id) as product_count
+    FROM categories c
+    LEFT JOIN products p ON c.id = p.category_id AND p.is_active = 1
+    WHERE c.is_active = 1 
+    AND (c.parent_id IS NULL OR c.parent_id = 0)
+    GROUP BY c.id
+    ORDER BY c.name
+    LIMIT 6
+");
     $stmt->execute();
     $categories = $stmt->fetchAll();
 } catch (Exception $e) {
@@ -1803,42 +1804,42 @@ async function addToWishlist(productId) {
 }
 
 // Load Quick View
-async function loadQuickView(productId) {
-    try {
-        const response = await fetch(`<?php echo SITE_URL; ?>ajax/quick-view.php?id=${productId}`);
-        const data = await response.json();
+// async function loadQuickView(productId) {
+//     try {
+//         const response = await fetch(`<?php echo SITE_URL; ?>ajax/quick-view.php?id=${productId}`);
+//         const data = await response.json();
         
-        if (data.success) {
-            document.getElementById('quickViewContent').innerHTML = data.html;
+//         if (data.success) {
+//             document.getElementById('quickViewContent').innerHTML = data.html;
             
-            // Initialize modal
-            const modal = new bootstrap.Modal(document.getElementById('quickViewModal'));
-            modal.show();
+//             // Initialize modal
+//             const modal = new bootstrap.Modal(document.getElementById('quickViewModal'));
+//             modal.show();
             
-            // Re-attach event listeners inside modal
-            setTimeout(() => {
-                const modalAddToCart = document.querySelector('#quickViewContent .add-to-cart-btn');
-                if (modalAddToCart) {
-                    modalAddToCart.addEventListener('click', function() {
-                        const modalProductId = this.dataset.productId;
-                        const modalProductName = this.dataset.productName;
-                        addToCart(modalProductId, 1, modalProductName);
+//             // Re-attach event listeners inside modal
+//             setTimeout(() => {
+//                 const modalAddToCart = document.querySelector('#quickViewContent .add-to-cart-btn');
+//                 if (modalAddToCart) {
+//                     modalAddToCart.addEventListener('click', function() {
+//                         const modalProductId = this.dataset.productId;
+//                         const modalProductName = this.dataset.productName;
+//                         addToCart(modalProductId, 1, modalProductName);
                         
-                        // Close modal after adding
-                        setTimeout(() => {
-                            modal.hide();
-                        }, 1000);
-                    });
-                }
-            }, 100);
-        } else {
-            showToast(data.message || 'Failed to load product details', 'error');
-        }
-    } catch (error) {
-        console.error('Quick view error:', error);
-        showToast('Something went wrong. Please try again.', 'error');
-    }
-}
+//                         // Close modal after adding
+//                         setTimeout(() => {
+//                             modal.hide();
+//                         }, 1000);
+//                     });
+//                 }
+//             }, 100);
+//         } else {
+//             showToast(data.message || 'Failed to load product details', 'error');
+//         }
+//     } catch (error) {
+//         console.error('Quick view error:', error);
+//         showToast('Something went wrong. Please try again.', 'error');
+//     }
+// }
 
 // Update Cart Count
 function updateCartCount(count) {

@@ -227,23 +227,23 @@ foreach ($orderItems as $item) {
                                         </div>
                                     </td>
                                     <td>' . htmlspecialchars($item['product_sku']) . '</td>
-                                    <td>$' . number_format($item['unit_price'], 2) . '</td>
+                                    <td>Ksh ' . number_format($item['unit_price'], 2) . '</td>
                                     <td>' . $item['quantity'] . '</td>
-                                    <td class="fw-bold">$' . number_format($item['total_price'], 2) . '</td>
+                                    <td class="fw-bold">Ksh' . number_format($item['total_price'], 2) . '</td>
                                 </tr>';
 }
 $content .= '
                                 <tr class="table-light">
                                     <td colspan="4" class="text-end fw-bold">Subtotal</td>
-                                    <td class="fw-bold">$' . number_format($order['total_amount'], 2) . '</td>
+                                    <td class="fw-bold">Ksh' . number_format($order['total_amount'], 2) . '</td>
                                 </tr>
                                 <tr class="table-light">
                                     <td colspan="4" class="text-end fw-bold">Shipping</td>
-                                    <td class="fw-bold">$0.00</td>
+                                    <td class="fw-bold">Ksh 0.00</td>
                                 </tr>
                                 <tr class="table-light">
                                     <td colspan="4" class="text-end fw-bold">Total</td>
-                                    <td class="fw-bold h5">$' . number_format($order['total_amount'], 2) . '</td>
+                                    <td class="fw-bold h5">Ksh ' . number_format($order['total_amount'], 2) . '</td>
                                 </tr>
                             </tbody>
                         </table>

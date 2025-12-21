@@ -114,27 +114,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ");
             
             $stmt->execute([
-                $first_name,
-                $last_name,
-                $email,
-                $hashed_password,
-                $phone,
-                $address,
-                $verification_token
+            $first_name,
+            $last_name,
+            $email,
+            $hashed_password,
+            $phone,
+            $address,
+            $verification_token
+        ]);
+
+        $user_id = $db->lastInsertId();
+        NotificationHelper::createSystemNotification(
+            $db,
+            'New User Registered',
+            "New user: {$userData['email']} has registered",
+            "/admin/users/view.php?id=$userId"
+        );
+
+        // ========== ADD USER REGISTRATION NOTIFICATION ==========
+        try {
+            $notifStmt = $db->prepare("
+                INSERT INTO notifications 
+                (user_id, type, title, message, link, is_read, created_at) 
+                VALUES (?, ?, ?, ?, ?, 0, NOW())
+            ");
+            
+            $notifStmt->execute([
+                $user_id,
+                'user',
+                'New Customer Registered',
+                $first_name . ' ' . $last_name . ' registered with email: ' . $email,
+                '/admin/customers.php?user_id=' . $user_id,
             ]);
             
-            $user_id = $db->lastInsertId();
+            error_log("New user notification created for: " . $email);
             
-            // ================================================================
-            // CREATE NOTIFICATION FOR NEW CUSTOMER REGISTRATION
-            // ================================================================
-            if (class_exists('Notification')) {
-                $notification = new Notification($db);
-                $notification->create(0, 'user', 'New Customer Registration', 
-                    $first_name . ' ' . $last_name . ' has registered as a new customer.', 
-                    '/admin/customers/view/' . $user_id
-                );
-            }
+        } catch (Exception $e) {
+            // Don't fail registration if notification fails
+            error_log('User notification error: ' . $e->getMessage());
+        }
+        // ========== END USER REGISTRATION NOTIFICATION ==========
+
+
+        // ================================================================
+
+        // Send welcome email (simulated for now)
+            
+            
             // ================================================================
             
             // Send welcome email (simulated for now)

@@ -1326,10 +1326,18 @@ function updateURLParameter(key, value) {
 }
 
 // Load Quick View via AJAX
-// Load quick view
-fetch('/linen-closet/products/api/quick-view.php?id=' + productId)
-    .then(response => response.json())
-    .then(data => {
+async function loadQuickView(productId) {
+    try {
+        const response = await fetch('<?php echo SITE_URL; ?>products/api/quick-view.php?id=' + productId, {
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        });
+        
+        if (!response.ok) throw new Error('Network response was not ok');
+        
+        const data = await response.json();
+        
         if (data.success) {
             // Show modal with HTML content
             document.getElementById('quickViewContent').innerHTML = data.html;
@@ -1337,8 +1345,47 @@ fetch('/linen-closet/products/api/quick-view.php?id=' + productId)
             // Initialize modal
             const modal = new bootstrap.Modal(document.getElementById('quickViewModal'));
             modal.show();
+            
+            // Reinitialize any event listeners in the loaded content
+            initializeQuickViewEvents();
+        } else {
+            console.error('Quick view error:', data.message);
+            showToast('Failed to load product details', 'error');
         }
+    } catch (error) {
+        console.error('Quick view error:', error);
+        showToast('Something went wrong. Please try again.', 'error');
+    }
+}
+
+// Initialize events for quick view modal content
+function initializeQuickViewEvents() {
+    // Add to cart in quick view
+    const quickViewAddToCart = document.querySelector('#quickViewModal .add-to-cart-btn');
+    if (quickViewAddToCart) {
+        quickViewAddToCart.addEventListener('click', function() {
+            const productId = this.dataset.productId;
+            const quantity = document.querySelector('#quickViewModal .quantity-input')?.value || 1;
+            addToCart(productId, parseInt(quantity));
+        });
+    }
+    
+    // Quantity controls in quick view
+    document.querySelectorAll('#quickViewModal .quantity-btn').forEach(button => {
+        button.addEventListener('click', function() {
+            const input = this.closest('.input-group').querySelector('.quantity-input');
+            let value = parseInt(input.value) || 1;
+            
+            if (this.classList.contains('minus') && value > 1) {
+                value--;
+            } else if (this.classList.contains('plus')) {
+                value++;
+            }
+            
+            input.value = value;
+        });
     });
+}
 // Add to Cart Function
 async function addToCart(productId, quantity) {
     try {

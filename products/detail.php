@@ -68,16 +68,16 @@ foreach ($variants as $variant) {
     if ($variant['color'] && !in_array($variant['color'], $availableColors)) {
         $availableColors[] = $variant['color'];
     }
-    if ($variant['material'] && !in_array($variant['material'], $availableMaterials)) {
-        $availableMaterials[] = $variant['material'];
-    }
+    // if ($variant['material'] && !in_array($variant['material'], $availableMaterials)) {
+    //     $availableMaterials[] = $variant['material'];
+    // }
 }
 
 // Fetch product specifications
 // Build specifications from product fields
 $specifications = [];
 if (!empty($product['materials'])) {
-    $specifications[] = ['spec_name' => 'Material', 'spec_value' => $product['materials']];
+    $specifications[] = ['spec_name' => 'Materials', 'spec_value' => $product['materials']];
 }
 if (!empty($product['weight'])) {
     $specifications[] = ['spec_name' => 'Weight', 'spec_value' => $product['weight'] . ' grams'];
@@ -106,10 +106,12 @@ $relatedStmt->execute([$product['category_id'], $product['id']]);
 $relatedProducts = $relatedStmt->fetchAll();
 
 // Fetch product reviews
+// Fetch product reviews
 $reviewsStmt = $db->prepare("
     SELECT 
         pr.*,
         CONCAT(u.first_name, ' ', u.last_name) as full_name,
+        u.email,
         u.created_at as member_since
     FROM product_reviews pr
     LEFT JOIN users u ON pr.user_id = u.id
@@ -654,8 +656,9 @@ require_once __DIR__ . '/../includes/header.php';
                         </div>
                     </div>
                     
+                    
                     <!-- Reviews List -->
-                    <div class="reviews-list">
+<div class="reviews-list">
     <?php if (!empty($reviews)): ?>
         <?php foreach ($reviews as $review): ?>
             <div class="review-item card border-0 shadow-sm mb-3">
@@ -665,24 +668,22 @@ require_once __DIR__ . '/../includes/header.php';
                             <div class="bg-dark text-white rounded-circle d-flex align-items-center justify-content-center me-3" 
                                  style="width: 50px; height: 50px;">
                                 <?php 
-                                $initials = '';
+                                $initials = 'U';
                                 if (!empty($review['full_name'])) {
-                                    $nameParts = explode(' ', $review['full_name']);
-                                    $initials = '';
-                                    foreach ($nameParts as $part) {
-                                        if (!empty($part)) {
-                                            $initials .= strtoupper(substr($part, 0, 1));
-                                        }
+                                    $nameParts = explode(' ', trim($review['full_name']));
+                                    if (count($nameParts) >= 2) {
+                                        $initials = strtoupper(substr($nameParts[0], 0, 1) . substr($nameParts[1], 0, 1));
+                                    } else {
+                                        $initials = strtoupper(substr($review['full_name'], 0, 2));
                                     }
-                                    $initials = substr($initials, 0, 2);
-                                } else {
-                                    $initials = 'A';
                                 }
-                                echo $initials;
+                                echo htmlspecialchars($initials);
                                 ?>
                             </div>
                             <div>
-                                <h6 class="mb-1 fw-bold"><?php echo htmlspecialchars($review['full_name'] ?? 'Anonymous'); ?></h6>
+                                <h6 class="mb-1 fw-bold">
+                                    <?php echo htmlspecialchars($review['full_name'] ?? 'Anonymous User'); ?>
+                                </h6>
                                 <small class="text-muted">
                                     <?php echo date('F j, Y', strtotime($review['created_at'])); ?>
                                     <?php if (!empty($review['member_since'])): ?>
@@ -699,12 +700,13 @@ require_once __DIR__ . '/../includes/header.php';
                     </div>
                     
                     <?php if (!empty($review['title'])): ?>
-                        <h6 class="fw-bold"><?php echo htmlspecialchars($review['title']); ?></h6>
+                        <h6 class="fw-bold mb-2"><?php echo htmlspecialchars($review['title']); ?></h6>
                     <?php endif; ?>
                     
                     <p class="mb-0"><?php echo nl2br(htmlspecialchars($review['review'] ?? '')); ?></p>
                     
-                    <?php if (!empty($review['images'])): ?>
+                    <!-- Note: If you add images column to reviews table, uncomment this -->
+                    <?php /* if (!empty($review['images'])): ?>
                         <div class="review-images mt-3">
                             <?php 
                             $images = json_decode($review['images'], true);
@@ -720,7 +722,7 @@ require_once __DIR__ . '/../includes/header.php';
                                 endforeach; 
                             endif; ?>
                         </div>
-                    <?php endif; ?>
+                    <?php endif; */ ?>
                 </div>
             </div>
         <?php endforeach; ?>
@@ -946,16 +948,24 @@ require_once __DIR__ . '/../includes/header.php';
         </div>
     <?php endif; ?>
     
-    <!-- Recently Viewed -->
+    
+   <!-- More Reviews -->
     <div class="row mt-5">
         <div class="col-12">
-            <h2 class="fw-bold mb-4">Recently Viewed</h2>
-            <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 g-4" id="recentlyViewed">
-                <!-- Will be populated by JavaScript -->
+            <h2 class="fw-bold mb-4">More Reviews</h2>
+            <div id="reviewsList">
+                <!-- Reviews will be loaded here -->
+            </div>
+            <div class="text-center mt-4">
+                <a href="#reviews" class="btn btn-outline-dark" onclick="loadAllReviews()">
+                    <i class="fas fa-comments me-2"></i> View All Reviews
+                </a>
             </div>
         </div>
     </div>
 </div>
+
+<!-- Write Review Modal -->
 
 <!-- Write Review Modal -->
 <div class="modal fade" id="writeReviewModal" tabindex="-1">
@@ -965,55 +975,54 @@ require_once __DIR__ . '/../includes/header.php';
                 <h5 class="modal-title fw-bold">Write a Review</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <div class="modal-body">
-                <form id="reviewForm">
-                    <input type="hidden" name="product_id" value="<?php echo $product['id']; ?>">
-                    
-                    <div class="mb-4 text-center">
-                        <h6 class="fw-bold mb-3">How would you rate this product?</h6>
-                        <div class="rating-input d-flex justify-content-center">
-                            <?php for ($i = 1; $i <= 5; $i++): ?>
-                                <label class="star-label mx-1" style="cursor: pointer;">
-                                    <input type="radio" name="rating" value="<?php echo $i; ?>" class="d-none">
-                                    <i class="far fa-star fa-2x text-warning"></i>
-                                </label>
-                            <?php endfor; ?>
+            
+            <?php if (isset($_SESSION['user_id'])): ?>
+                <!-- Wrap everything in a form -->
+                <form id="reviewForm" onsubmit="event.preventDefault(); submitReview();">
+                    <div class="modal-body">
+                        <!-- ... your existing modal body content ... -->
+                        
+                        <div class="mb-4 text-center">
+                            <h6 class="fw-bold mb-3">How would you rate this product?</h6>
+                            <div class="rating-input d-flex justify-content-center">
+                                <?php for ($i = 1; $i <= 5; $i++): ?>
+                                    <label class="star-label mx-1" style="cursor: pointer;">
+                                        <input type="radio" name="rating" value="<?php echo $i; ?>" class="d-none">
+                                        <i class="far fa-star fa-2x text-warning"></i>
+                                    </label>
+                                <?php endfor; ?>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Review Title</label>
+                            <input type="text" name="title" class="form-control" placeholder="Summarize your experience" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Your Review</label>
+                            <textarea name="review" class="form-control" rows="5" 
+                                placeholder="Share your thoughts about this product..." required></textarea>
                         </div>
                     </div>
                     
-                    <div class="mb-3">
-                        <label class="form-label fw-bold">Review Title</label>
-                        <input type="text" name="title" class="form-control" placeholder="Summarize your experience" required>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label class="form-label fw-bold">Your Review</label>
-                        <textarea name="review" class="form-control" rows="5" 
-          placeholder="Share your thoughts about this product..." required></textarea>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label class="form-label fw-bold">Upload Photos (Optional)</label>
-                        <input type="file" name="images[]" class="form-control" multiple accept="image/*">
-                        <small class="text-muted">You can upload up to 4 images (JPEG, PNG, max 2MB each)</small>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label class="form-label fw-bold">Your Name</label>
-                        <input type="text" name="reviewer_name" class="form-control" required>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label class="form-label fw-bold">Email Address</label>
-                        <input type="email" name="reviewer_email" class="form-control" required>
-                        <small class="text-muted">Your email will not be published</small>
+                    <div class="modal-footer border-0">
+                        <button type="button" class="btn btn-outline-dark" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-dark" id="submitReview">Submit Review</button>
                     </div>
                 </form>
-            </div>
-            <div class="modal-footer border-0">
-                <button type="button" class="btn btn-outline-dark" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-dark" id="submitReview">Submit Review</button>
-            </div>
+            <?php else: ?>
+                <div class="modal-body">
+                    <div class="text-center py-5">
+                        <i class="fas fa-user-lock fa-3x text-muted mb-3"></i>
+                        <h5 class="fw-bold mb-3">Login Required</h5>
+                        <p class="text-muted mb-4">Please login to submit a review.</p>
+                        <a href="<?php echo SITE_URL; ?>auth/login" class="btn btn-dark">
+                            <i class="fas fa-sign-in-alt me-2"></i> Login
+                        </a>
+                    </div>
+                </div>
+            <?php endif; ?>
         </div>
     </div>
 </div>
@@ -1336,71 +1345,424 @@ function showToast(message, type = 'success') {
 }
 
 // Submit review
+
 async function submitReview() {
     const form = document.getElementById('reviewForm');
-    const formData = new FormData(form);
+    const submitBtn = document.getElementById('submitReview');
+    
+    // Get form data
+    const rating = document.querySelector('input[name="rating"]:checked');
+    const title = document.querySelector('input[name="title"]').value;
+    const review = document.querySelector('textarea[name="review"]').value;
+    
+    // Validation
+    if (!rating) {
+        showToast('Please select a rating', 'error');
+        return;
+    }
+    
+    if (!title || title.trim() === '') {
+        showToast('Please enter a review title', 'error');
+        return;
+    }
+    
+    if (!review || review.trim() === '') {
+        showToast('Please write your review', 'error');
+        return;
+    }
+    
+    // Show loading state
+    const originalText = submitBtn.innerHTML;
+    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Submitting...';
+    submitBtn.disabled = true;
     
     try {
-        const response = await fetch('<?php echo SITE_URL; ?>ajax/submit-review.php', {
+        const response = await fetch('<?php echo SITE_URL; ?>products/api/submit-review.php', {
             method: 'POST',
-            body: formData
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                product_id: <?php echo $product['id']; ?>,
+                rating: rating.value,
+                title: title.trim(),
+                review: review.trim()
+            })
         });
         
+        console.log('Response status:', response.status);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
         const data = await response.json();
+        console.log('API response:', data);
         
         if (data.success) {
-            showToast('Review submitted successfully! It will appear after approval.', 'success');
+            showToast(data.message, 'success');
             
             // Close modal
             const modal = bootstrap.Modal.getInstance(document.getElementById('writeReviewModal'));
-            modal.hide();
+            if (modal) {
+                modal.hide();
+            }
             
             // Reset form
             form.reset();
             
-            // Reload reviews after a delay
+            // Reset stars
+            document.querySelectorAll('.rating-input .star-label i').forEach(star => {
+                star.classList.remove('fas');
+                star.classList.add('far');
+            });
+            
+            // Reload page after 1.5 seconds to show new review
             setTimeout(() => {
                 location.reload();
-            }, 2000);
+            }, 1500);
+            
         } else {
-            showToast(data.message || 'Failed to submit review', 'error');
+            showToast(data.message, 'error');
         }
+        
     } catch (error) {
         console.error('Submit review error:', error);
-        showToast('Something went wrong. Please try again.', 'error');
+        showToast('Failed to submit review: ' + error.message, 'error');
+    } finally {
+        // Reset button state
+        submitBtn.innerHTML = originalText;
+        submitBtn.disabled = false;
     }
 }
 
-// Load recently viewed products
-function loadRecentlyViewed() {
-    const recentlyViewed = localStorage.getItem('recentlyViewed');
-    if (recentlyViewed) {
-        const productIds = JSON.parse(recentlyViewed);
+// Load reviews for the product
+async function loadProductReviews() {
+    const container = document.getElementById('reviewsList');
+    if (!container) return;
+    
+    const productId = <?php echo $product['id']; ?>;
+    
+    // Show loading
+    container.innerHTML = '<div class="text-center py-3"><div class="spinner-border text-dark" role="status"></div><p class="mt-2 text-muted">Loading reviews...</p></div>';
+    
+    try {
+        const response = await fetch(`<?php echo SITE_URL; ?>ajax/get-reviews.php?product_id=${productId}&limit=4`);
         
-        // Fetch and display recently viewed products
-        // This would typically be done via AJAX
-        const container = document.getElementById('recentlyViewed');
-        if (container) {
-            container.innerHTML = '<p class="text-muted">Loading recently viewed products...</p>';
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
         }
+        
+        const data = await response.json();
+        
+        if (data.success && data.reviews && data.reviews.length > 0) {
+            displayReviews(data.reviews, container);
+        } else {
+            container.innerHTML = `
+                <div class="text-center py-5">
+                    <i class="fas fa-comments fa-3x text-muted mb-3"></i>
+                    <h5 class="fw-bold mb-3">No Reviews Yet</h5>
+                    <p class="text-muted">Be the first to review this product!</p>
+                    <button class="btn btn-dark" data-bs-toggle="modal" data-bs-target="#writeReviewModal">
+                        <i class="fas fa-pen me-2"></i> Write First Review
+                    </button>
+                </div>
+            `;
+        }
+        
+    } catch (error) {
+        console.error('Error loading reviews:', error);
+        container.innerHTML = '<p class="text-muted">Could not load reviews.</p>';
     }
 }
 
-// Save current product to recently viewed
-const currentProductId = <?php echo $product['id']; ?>;
-let recentlyViewed = JSON.parse(localStorage.getItem('recentlyViewed') || '[]');
+// Display reviews
+function displayReviews(reviews, container) {
+    if (!reviews || reviews.length === 0) {
+        container.innerHTML = '<p class="text-muted">No reviews found.</p>';
+        return;
+    }
+    
+    let html = '<div class="row g-4">';
+    
+    reviews.forEach(review => {
+        const date = new Date(review.created_at).toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+        });
+        
+        // Get user initials
+        let initials = 'U';
+        if (review.full_name) {
+            const nameParts = review.full_name.split(' ');
+            if (nameParts.length >= 2) {
+                initials = (nameParts[0].charAt(0) + nameParts[1].charAt(0)).toUpperCase();
+            } else {
+                initials = nameParts[0].substring(0, 2).toUpperCase();
+            }
+        }
+        
+        html += `
+            <div class="col-md-6">
+                <div class="card border-0 shadow-sm h-100">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center mb-3">
+                            <div class="bg-dark text-white rounded-circle d-flex align-items-center justify-content-center me-3" 
+                                 style="width: 40px; height: 40px;">
+                                ${initials}
+                            </div>
+                            <div>
+                                <h6 class="mb-1 fw-bold">${review.full_name || 'Anonymous'}</h6>
+                                <small class="text-muted">${date}</small>
+                            </div>
+                        </div>
+                        
+                        <div class="rating mb-3">
+                            ${Array.from({length: 5}, (_, i) => 
+                                `<i class="fas fa-star ${i < review.rating ? 'text-warning' : 'text-muted'}"></i>`
+                            ).join('')}
+                        </div>
+                        
+                        ${review.title ? `<h6 class="fw-bold mb-2">${review.title}</h6>` : ''}
+                        
+                        <p class="mb-0 text-truncate-3" style="max-height: 4.5em; overflow: hidden;">
+                            ${review.review}
+                        </p>
+                        
+                        <div class="mt-3 pt-3 border-top">
+                            <small class="text-muted">
+                                <i class="fas fa-thumbs-up me-1"></i> Helpful? 
+                                <a href="#" class="text-decoration-none ms-2">Yes</a> • 
+                                <a href="#" class="text-decoration-none">No</a>
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    container.innerHTML = html;
+}
 
-// Remove if already exists
-recentlyViewed = recentlyViewed.filter(id => id !== currentProductId);
+// Load all reviews (scrolls to reviews tab)
+function loadAllReviews() {
+    // Scroll to reviews section
+    const reviewsTab = document.getElementById('reviews-tab');
+    if (reviewsTab) {
+        reviewsTab.click();
+        window.scrollTo({
+            top: document.getElementById('reviews').offsetTop - 100,
+            behavior: 'smooth'
+        });
+    }
+}
 
-// Add to beginning
-recentlyViewed.unshift(currentProductId);
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    // Load product reviews
+    loadProductReviews();
+    
+    // Keep recently viewed functionality in localStorage for future use
+    // But don't display it
+    const currentProductId = <?php echo $product['id']; ?>;
+    let recentlyViewed = JSON.parse(localStorage.getItem('recentlyViewed') || '[]');
+    recentlyViewed = recentlyViewed.filter(id => id !== currentProductId);
+    recentlyViewed.unshift(currentProductId);
+    recentlyViewed = recentlyViewed.slice(0, 8);
+    localStorage.setItem('recentlyViewed', JSON.stringify(recentlyViewed));
+});
+// Display recently viewed products
+function displayRecentlyViewedProducts(products, container) {
+    if (!products || products.length === 0) {
+        container.innerHTML = '<p class="text-muted">No recently viewed products.</p>';
+        return;
+    }
+    
+    let html = '<div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 g-4">';
+    
+    // Limit to 4 products
+    products.slice(0, 4).forEach(product => {
+        const imageUrl = product.image_url 
+            ? '<?php echo SITE_URL; ?>' + product.image_url 
+            : '<?php echo SITE_URL; ?>assets/images/placeholder.jpg';
+        
+        const productUrl = '<?php echo SITE_URL; ?>products/detail.php?slug=' + product.slug;
+        const inStock = product.stock_quantity > 0;
+        const hasDiscount = product.original_price_numeric && product.original_price_numeric > product.price_numeric;
+        const discountPercent = hasDiscount 
+            ? Math.round(((product.original_price_numeric - product.price_numeric) / product.original_price_numeric) * 100)
+            : 0;
+        
+        html += `
+            <div class="col">
+                <div class="card h-100 product-card border-0 shadow-sm hover-lift">
+                    <div class="position-relative overflow-hidden" style="height: 200px;">
+                        <a href="${productUrl}" class="text-decoration-none">
+                            <img src="${imageUrl}" 
+                                 class="card-img-top h-100 w-100 object-fit-cover" 
+                                 alt="${product.name}"
+                                 onerror="this.onerror=null; this.src='<?php echo SITE_URL; ?>assets/images/placeholder.jpg';">
+                            ${!inStock ? `
+                                <div class="position-absolute top-0 start-0 w-100 h-100 bg-dark bg-opacity-50 d-flex align-items-center justify-content-center">
+                                    <span class="badge bg-secondary">Out of Stock</span>
+                                </div>
+                            ` : ''}
+                        </a>
+                        
+                        <!-- Badges -->
+                        <div class="position-absolute top-0 start-0 m-2">
+                            ${!inStock ? `<span class="badge bg-secondary">Out of Stock</span>` : ''}
+                            ${hasDiscount ? `<span class="badge bg-danger">-${discountPercent}%</span>` : ''}
+                            ${product.rating >= 4.5 ? `<span class="badge bg-warning text-dark"><i class="fas fa-star me-1"></i> ${product.rating.toFixed(1)}</span>` : ''}
+                        </div>
+                        
+                        <div class="position-absolute top-0 end-0 m-2">
+                            <button type="button" class="btn btn-light btn-sm rounded-circle shadow-sm add-to-wishlist" 
+                                    data-product-id="${product.id}">
+                                <i class="far fa-heart"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="card-body d-flex flex-column">
+                        <div class="mb-2">
+                            <small class="text-muted">${product.category || 'Uncategorized'}</small>
+                        </div>
+                        
+                        <h6 class="card-title fw-bold mb-2">
+                            <a href="${productUrl}" class="text-decoration-none text-dark text-truncate-2">
+                                ${product.name}
+                            </a>
+                        </h6>
+                        
+                        ${product.rating > 0 ? `
+                            <div class="rating mb-2">
+                                ${Array.from({length: 5}, (_, i) => {
+                                    const starClass = i < Math.floor(product.rating) ? 'fas fa-star text-warning' : 
+                                                     i < product.rating ? 'fas fa-star-half-alt text-warning' : 'far fa-star text-muted';
+                                    return `<i class="${starClass}"></i>`;
+                                }).join('')}
+                                <small class="text-muted ms-1">(${product.review_count || 0})</small>
+                            </div>
+                        ` : ''}
+                        
+                        <div class="mt-auto">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h5 class="text-dark mb-0">Ksh ${product.price_numeric.toFixed(2)}</h5>
+                                    ${hasDiscount ? `
+                                        <small class="text-muted text-decoration-line-through">
+                                            Ksh ${product.original_price_numeric.toFixed(2)}
+                                        </small>
+                                    ` : ''}
+                                </div>
+                                ${inStock ? `
+                                    <button type="button" 
+                                            class="btn btn-sm btn-outline-dark add-to-cart-btn"
+                                            data-product-id="${product.id}">
+                                        <i class="fas fa-cart-plus"></i>
+                                    </button>
+                                ` : `
+                                    <span class="badge bg-secondary">Out of Stock</span>
+                                `}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    container.innerHTML = html;
+    
+    // Add event listeners to new buttons
+    addRecentlyViewedEventListeners();
+}
 
-// Keep only last 4 products
-recentlyViewed = recentlyViewed.slice(0, 4);
+// Add event listeners to recently viewed products
+function addRecentlyViewedEventListeners() {
+    // Add to cart buttons
+    document.querySelectorAll('#recentlyViewed .add-to-cart-btn').forEach(button => {
+        button.addEventListener('click', function(e) {
+            e.preventDefault();
+            const productId = this.dataset.productId;
+            addToCart(productId, 1);
+        });
+    });
+    
+    // Add to wishlist buttons
+    document.querySelectorAll('#recentlyViewed .add-to-wishlist').forEach(button => {
+        button.addEventListener('click', function(e) {
+            e.preventDefault();
+            const productId = this.dataset.productId;
+            addToWishlist(productId);
+        });
+    });
+}
 
-// Save back to localStorage
-localStorage.setItem('recentlyViewed', JSON.stringify(recentlyViewed));
+// Save current product to recently viewed - UPDATED VERSION
+function updateRecentlyViewed() {
+    const currentProductId = <?php echo $product['id']; ?>;
+    let recentlyViewed = JSON.parse(localStorage.getItem('recentlyViewed') || '[]');
+    
+    // Remove if already exists
+    recentlyViewed = recentlyViewed.filter(id => id !== currentProductId);
+    
+    // Add to beginning
+    recentlyViewed.unshift(currentProductId);
+    
+    // Keep only last 8 products (to have more for display filtering)
+    recentlyViewed = recentlyViewed.slice(0, 8);
+    
+    // Save back to localStorage
+    localStorage.setItem('recentlyViewed', JSON.stringify(recentlyViewed));
+    
+    // Update the display if container exists
+    const container = document.getElementById('recentlyViewed');
+    if (container && container.querySelector('.spinner-border')) {
+        // If still loading, wait a bit then reload
+        setTimeout(() => {
+            loadRecentlyViewed();
+        }, 500);
+    }
+    
+    console.log('Recently updated:', recentlyViewed);
+    return recentlyViewed;
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    // Update recently viewed
+    updateRecentlyViewed();
+    
+    // Load recently viewed products after a short delay
+    setTimeout(() => {
+        loadRecentlyViewed();
+    }, 100);
+});
+
+// Helper functions (you should have these in your file)
+function addToCart(productId, quantity) {
+    // Your existing addToCart function
+    console.log('Add to cart:', productId, quantity);
+    // Implement your add to cart logic here
+    showToast('Product added to cart!', 'success');
+}
+
+function addToWishlist(productId) {
+    console.log('Add to wishlist:', productId);
+    showToast('Product added to wishlist!', 'success');
+    // Implement your wishlist logic here
+}
+
+function showToast(message, type = 'success') {
+    // Your existing toast function
+    console.log('Toast:', type, message);
+}
 </script>
 
 <?php

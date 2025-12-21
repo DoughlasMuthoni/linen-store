@@ -434,11 +434,71 @@ require_once __DIR__ . '/../includes/header.php';
                                 <i class="fas fa-file-invoice me-2"></i> View Invoice
                             </a>
                             
-                            <?php if ($order['payment_status'] === 'pending' && $order['payment_method'] === 'mpesa'): ?>
-                                <button type="button" class="btn btn-success btn-lg" id="completeMpesaPayment">
-                                    <i class="fas fa-mobile-alt me-2"></i> Complete M-Pesa Payment
-                                </button>
-                            <?php endif; ?>
+                           <?php if ($order['payment_status'] === 'pending' && $order['payment_method'] === 'mpesa'): ?>
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white py-3 border-0">
+            <h5 class="fw-bold mb-0">
+                <i class="fas fa-mobile-alt me-2 text-success"></i> Complete M-Pesa Payment
+            </h5>
+        </div>
+        <div class="card-body">
+            <div id="paymentForm">
+                <div class="mb-3">
+                    <label class="form-label fw-bold">M-Pesa Phone Number</label>
+                    <div class="input-group">
+                        <span class="input-group-text bg-light">+254</span>
+                        <input type="tel" 
+                               class="form-control" 
+                               id="mpesaPhone"
+                               placeholder="700 000 000"
+                               value="<?php echo substr($order['phone'] ?? '', 3); ?>">
+                    </div>
+                    <div class="form-text">
+                        Enter the phone number registered with M-Pesa
+                    </div>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Payment Amount</label>
+                    <div class="input-group">
+                        <span class="input-group-text bg-light">Ksh</span>
+                        <input type="text" 
+                               class="form-control text-end fw-bold" 
+                               value="<?php echo number_format($order['total_amount'], 2); ?>"
+                               readonly>
+                    </div>
+                </div>
+                
+                <button type="button" class="btn btn-success btn-lg w-100" id="initiateMpesaPayment">
+                    <i class="fas fa-mobile-alt me-2"></i> Pay with M-Pesa
+                </button>
+                
+                <div class="alert alert-info mt-3">
+                    <h6><i class="fas fa-info-circle me-2"></i> How to pay:</h6>
+                    <ol class="mb-0 small">
+                        <li>Click "Pay with M-Pesa" button</li>
+                        <li>Check your phone for STK Push prompt</li>
+                        <li>Enter your M-Pesa PIN</li>
+                        <li>Wait for confirmation</li>
+                    </ol>
+                </div>
+                
+                <div id="paymentResult" class="mt-3"></div>
+            </div>
+            
+            <div id="paymentStatus" style="display: none;">
+                <div class="text-center py-4">
+                    <div class="spinner-border text-success mb-3" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <h6 class="fw-bold">Processing Payment...</h6>
+                    <p class="text-muted small mb-3">Please wait while we process your payment</p>
+                    <div id="statusMessage"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+<?php endif; ?>
                             
                             <a href="<?php echo SITE_URL; ?>products" class="btn btn-dark btn-lg">
                                 <i class="fas fa-shopping-bag me-2"></i> Continue Shopping
@@ -709,22 +769,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
     
-    // Complete M-Pesa Payment
-    document.getElementById('completeMpesaPayment')?.addEventListener('click', function() {
-        if (confirm('Complete M-Pesa payment for this order?')) {
-            // Simulate payment processing
-            this.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> Processing...';
-            this.disabled = true;
-            
-            // In a real app, you would initiate M-Pesa payment here
-            setTimeout(() => {
-                showToast('Payment initiated! Check your phone to complete the payment.', 'info');
-                this.innerHTML = '<i class="fas fa-mobile-alt me-2"></i> Complete M-Pesa Payment';
-                this.disabled = false;
-            }, 2000);
-        }
-    });
-    
     // Share buttons
     document.querySelectorAll('.btn-outline-primary, .btn-outline-info, .btn-outline-danger, .btn-outline-success').forEach(btn => {
         btn.addEventListener('click', function(e) {
@@ -753,7 +797,152 @@ document.addEventListener('DOMContentLoaded', function() {
             window.open(url, '_blank', 'width=600,height=400');
         });
     });
-});
+    
+    // M-Pesa Payment Handler
+    document.getElementById('initiateMpesaPayment')?.addEventListener('click', function() {
+        const phoneInput = document.getElementById('mpesaPhone');
+        const phone = phoneInput.value.replace(/\D/g, '');
+        
+        if (!phone || phone.length !== 9) {
+            alert('Please enter a valid 9-digit phone number (without country code)');
+            phoneInput.focus();
+            return;
+        }
+        
+        // Show processing state
+        document.getElementById('paymentForm').style.display = 'none';
+        document.getElementById('paymentStatus').style.display = 'block';
+        
+        // Make payment request
+        fetch('<?php echo SITE_URL; ?>ajax/process_mpesa_payment.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                order_id: <?php echo $orderId; ?>,
+                phone: phone
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('statusMessage').innerHTML = `
+                    <div class="alert alert-success">
+                        <i class="fas fa-check-circle me-2"></i>
+                        ${data.message}
+                    </div>
+                    <p class="small text-muted">
+                        Check your phone now to complete the payment. This page will update automatically.
+                    </p>
+                `;
+                
+                // Start polling for payment status
+                pollPaymentStatus(data.checkout_id);
+            } else {
+                document.getElementById('statusMessage').innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-times-circle me-2"></i>
+                        ${data.message}
+                    </div>
+                `;
+                
+                // Show retry button
+                setTimeout(() => {
+                    document.getElementById('paymentForm').style.display = 'block';
+                    document.getElementById('paymentStatus').style.display = 'none';
+                }, 3000);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            document.getElementById('statusMessage').innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-times-circle me-2"></i>
+                    An error occurred. Please try again.
+                </div>
+            `;
+            
+            setTimeout(() => {
+                document.getElementById('paymentForm').style.display = 'block';
+                document.getElementById('paymentStatus').style.display = 'none';
+            }, 3000);
+        });
+    });
+
+    // Format phone input
+    document.getElementById('mpesaPhone')?.addEventListener('input', function() {
+            // Remove non-numeric characters
+            this.value = this.value.replace(/\D/g, '');
+            
+            // Limit to 9 digits
+            if (this.value.length > 9) {
+                this.value = this.value.substring(0, 9);
+            }
+        });
+    });
+
+// Poll for payment status
+function pollPaymentStatus(checkoutId) {
+    let attempts = 0;
+    const maxAttempts = 30; // Poll for 5 minutes (30 * 10 seconds)
+    
+    const poll = setInterval(() => {
+        attempts++;
+        
+        if (attempts > maxAttempts) {
+            clearInterval(poll);
+            document.getElementById('statusMessage').innerHTML += `
+                <div class="alert alert-warning mt-3">
+                    <i class="fas fa-clock me-2"></i>
+                    Payment taking longer than expected. Please check your phone or try again.
+                </div>
+                <button onclick="location.reload()" class="btn btn-outline-dark btn-sm">
+                    Refresh Page
+                </button>
+            `;
+            return;
+        }
+        
+        // Check payment status
+        fetch('<?php echo SITE_URL; ?>ajax/check_payment_status.php?checkout_id=' + checkoutId)
+        .then(response => response.json())
+        .then(data => {
+            if (data.paid) {
+                clearInterval(poll);
+                document.getElementById('statusMessage').innerHTML = `
+                    <div class="alert alert-success">
+                        <i class="fas fa-check-circle me-2"></i>
+                        Payment successful! Receipt: ${data.receipt}
+                    </div>
+                    <p class="text-muted small">
+                        Your order is now being processed. You will receive a confirmation email shortly.
+                    </p>
+                `;
+                
+                // Redirect to order details after 3 seconds
+                setTimeout(() => {
+                    window.location.href = '<?php echo SITE_URL; ?>orders/view.php?id=<?php echo $orderId; ?>';
+                }, 3000);
+            } else if (data.failed) {
+                clearInterval(poll);
+                document.getElementById('statusMessage').innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-times-circle me-2"></i>
+                        Payment failed: ${data.message}
+                    </div>
+                    <button onclick="location.reload()" class="btn btn-outline-dark btn-sm">
+                        Try Again
+                    </button>
+                `;
+            }
+            // If still pending, continue polling
+        })
+        .catch(error => {
+            console.error('Polling error:', error);
+        });
+    }, 10000); // Poll every 10 seconds
+}
 
 // Show toast notification
 function showToast(message, type = 'success') {

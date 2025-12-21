@@ -1,125 +1,140 @@
 <?php
-// /linen-closet/products/api/submit-review.php
+// Turn off ALL error display
+error_reporting(0);
+ini_set('display_errors', 0);
 
-require_once __DIR__ . '/../../includes/config.php';
-require_once __DIR__ . '/../../includes/Database.php';
-require_once __DIR__ . '/../../includes/App.php';
+// Set JSON headers FIRST
+header('Content-Type: application/json');
+header('Cache-Control: no-cache, must-revalidate');
 
-$app = new App();
-$db = $app->getDB();
-
-// Check if user is logged in
-if (!isset($_SESSION['user_id'])) {
-    $app->jsonResponse([
-        'success' => false,
-        'message' => 'Please login to submit a review.'
-    ], 401);
-    exit;
-}
-
-// Get and validate input
-$input = json_decode(file_get_contents('php://input'), true);
-
-if (!$app->validateCSRFToken($input['csrf_token'] ?? '')) {
-    $app->jsonResponse([
-        'success' => false,
-        'message' => 'Invalid security token.'
-    ], 403);
-    exit;
-}
-
-$productId = (int)($input['product_id'] ?? 0);
-$rating = (int)($input['rating'] ?? 0);
-$title = $app->sanitize($input['title'] ?? '');
-$review = $app->sanitize($input['review'] ?? '');
-
-// Validation
-if ($productId <= 0) {
-    $app->jsonResponse([
-        'success' => false,
-        'message' => 'Invalid product.'
-    ], 400);
-    exit;
-}
-
-if ($rating < 1 || $rating > 5) {
-    $app->jsonResponse([
-        'success' => false,
-        'message' => 'Rating must be between 1 and 5.'
-    ], 400);
-    exit;
-}
-
-if (empty($review)) {
-    $app->jsonResponse([
-        'success' => false,
-        'message' => 'Please write a review.'
-    ], 400);
-    exit;
-}
-
-// Check if product exists
-$productStmt = $db->prepare("SELECT id FROM products WHERE id = ? AND is_active = 1");
-$productStmt->execute([$productId]);
-if (!$productStmt->fetch()) {
-    $app->jsonResponse([
-        'success' => false,
-        'message' => 'Product not found.'
-    ], 404);
-    exit;
-}
-
-// Check if user has already reviewed this product
-$existingReviewStmt = $db->prepare("SELECT id FROM product_reviews WHERE product_id = ? AND user_id = ?");
-$existingReviewStmt->execute([$productId, $_SESSION['user_id']]);
-if ($existingReviewStmt->fetch()) {
-    $app->jsonResponse([
-        'success' => false,
-        'message' => 'You have already reviewed this product.'
-    ], 400);
-    exit;
-}
-
-// Insert review
-$stmt = $db->prepare("
-    INSERT INTO product_reviews (product_id, user_id, rating, title, review, is_approved)
-    VALUES (?, ?, ?, ?, ?, ?)
-");
-
-$isApproved = 1; // Set to 0 if you want to approve reviews manually
+// Start output buffering to catch any stray output
+ob_start();
 
 try {
-    $stmt->execute([$productId, $_SESSION['user_id'], $rating, $title, $review, $isApproved]);
+    // Include files
+    require_once __DIR__ . '/../../includes/config.php';
+    require_once __DIR__ . '/../../includes/Database.php';
     
-    // Update product rating stats
-    $updateStmt = $db->prepare("
-        UPDATE products 
-        SET rating = (
-            SELECT AVG(rating) 
-            FROM product_reviews 
-            WHERE product_id = ? 
-            AND is_approved = 1
-        ),
-        review_count = (
-            SELECT COUNT(*) 
-            FROM product_reviews 
-            WHERE product_id = ? 
-            AND is_approved = 1
-        )
-        WHERE id = ?
+    // Get database connection
+    $db = Database::getInstance();
+    $pdo = $db->getConnection();
+    
+    // Start session
+    session_start();
+    
+    // Check if user is logged in
+    if (!isset($_SESSION['user_id'])) {
+        throw new Exception('Please login to submit a review.', 401);
+    }
+    
+    // Get input data
+    $input = json_decode(file_get_contents('php://input'), true);
+    
+    if (!$input) {
+        throw new Exception('Invalid JSON data received.', 400);
+    }
+    
+    $productId = (int)($input['product_id'] ?? 0);
+    $rating = (int)($input['rating'] ?? 0);
+    $title = trim($input['title'] ?? '');
+    $review = trim($input['review'] ?? '');
+    
+    // Validate
+    if ($productId <= 0) {
+        throw new Exception('Invalid product.', 400);
+    }
+    
+    if ($rating < 1 || $rating > 5) {
+        throw new Exception('Rating must be between 1 and 5.', 400);
+    }
+    
+    if (empty($review)) {
+        throw new Exception('Please write a review.', 400);
+    }
+    
+    // Check if product exists
+    $stmt = $pdo->prepare("SELECT id FROM products WHERE id = ? AND is_active = 1");
+    $stmt->execute([$productId]);
+    if (!$stmt->fetch()) {
+        throw new Exception('Product not found.', 404);
+    }
+    
+    // Check if user already reviewed
+    $stmt = $pdo->prepare("SELECT id FROM product_reviews WHERE product_id = ? AND user_id = ?");
+    $stmt->execute([$productId, $_SESSION['user_id']]);
+    if ($stmt->fetch()) {
+        throw new Exception('You have already reviewed this product.', 400);
+    }
+    
+    // Insert review
+    $stmt = $pdo->prepare("
+        INSERT INTO product_reviews 
+        (product_id, user_id, rating, title, review, is_approved, created_at)
+        VALUES (?, ?, ?, ?, ?, 1, NOW())
     ");
-    $updateStmt->execute([$productId, $productId, $productId]);
     
-    $app->jsonResponse([
+    $stmt->execute([$productId, $_SESSION['user_id'], $rating, $title, $review]);
+    $reviewId = $pdo->lastInsertId();
+
+    // Create notification for admin about new review
+// Create notification for admin about new review
+    try {
+        // Get product name and slug for notification
+        $productStmt = $pdo->prepare("SELECT name, slug FROM products WHERE id = ?");
+        $productStmt->execute([$productId]);
+        $product = $productStmt->fetch();
+        $productName = $product['name'] ?? 'Product';
+        $productSlug = $product['slug'] ?? '';
+        
+        // Get user info
+        $userStmt = $pdo->prepare("SELECT first_name, last_name FROM users WHERE id = ?");
+        $userStmt->execute([$_SESSION['user_id']]);
+        $user = $userStmt->fetch();
+        $userName = $user ? ($user['first_name'] . ' ' . $user['last_name']) : 'User';
+        
+        // Insert notification
+        $notifStmt = $pdo->prepare("
+            INSERT INTO notifications 
+            (user_id, type, title, message, link, is_read, created_at) 
+            VALUES (?, ?, ?, ?, ?, 0, NOW())
+        ");
+        
+        $notifStmt->execute([
+            $_SESSION['user_id'], // User who wrote the review
+            'review',
+            'New Product Review',
+            $userName . ' reviewed "' . $productName . '" with ' . $rating . ' stars',
+            $productSlug ? '/products/detail.php?slug=' . $productSlug . '#reviews' : '/products',
+        ]);
+        
+    } catch (Exception $e) {
+        // Don't fail review if notification fails
+        error_log('Notification creation error: ' . $e->getMessage());
+    }
+    
+    // Clear output buffer
+    ob_end_clean();
+    
+    // Send success response
+    echo json_encode([
         'success' => true,
-        'message' => 'Review submitted successfully.'
+        'message' => 'Review submitted successfully!',
+        'review_id' => $reviewId
     ]);
     
-} catch (PDOException $e) {
-    error_log('Review submission error: ' . $e->getMessage());
-    $app->jsonResponse([
+} catch (Exception $e) {
+    // Clear any output
+    ob_end_clean();
+    
+    // Set HTTP status code
+    $code = $e->getCode() >= 400 ? $e->getCode() : 500;
+    http_response_code($code);
+    
+    // Send error response
+    echo json_encode([
         'success' => false,
-        'message' => 'Failed to submit review. Please try again.'
-    ], 500);
+        'message' => $e->getMessage()
+    ]);
 }
-?>
+
+exit;

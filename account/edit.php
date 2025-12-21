@@ -7,6 +7,8 @@ ini_set('display_errors', 1);
 require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/Database.php';
 require_once __DIR__ . '/../includes/App.php';
+// Add NotificationHelper
+require_once __DIR__ . '/../includes/NotificationHelper.php';
 
 $app = new App();
 $db = $app->getDB();
@@ -74,6 +76,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     if (empty($errors)) {
         try {
+            // Get old user data to compare changes
+            $oldFirstName = $user['first_name'];
+            $oldLastName = $user['last_name'];
+            $oldEmail = $user['email'];
+            $oldPhone = $user['phone'] ?? '';
+            $oldAddress = $user['address'] ?? '';
+            
             // Update user
             $updateStmt = $db->prepare("
                 UPDATE users 
@@ -88,6 +97,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             $success = 'Profile updated successfully!';
             
+            // ========== ADD SYSTEM NOTIFICATION FOR PROFILE UPDATE ==========
+            try {
+                // Track what fields changed
+                $changes = [];
+                
+                if ($oldFirstName != $firstName) {
+                    $changes[] = "First name changed";
+                }
+                if ($oldLastName != $lastName) {
+                    $changes[] = "Last name changed";
+                }
+                if ($oldEmail != $email) {
+                    $changes[] = "Email changed from $oldEmail to $email";
+                }
+                if ($oldPhone != $phone) {
+                    $changes[] = "Phone number updated";
+                }
+                if ($oldAddress != $address) {
+                    $changes[] = "Address updated";
+                }
+                
+                // Only create notification if something actually changed
+                if (!empty($changes)) {
+                    $changeSummary = implode(', ', $changes);
+                    
+                    // Create system notification for admin
+                    $notificationResult = NotificationHelper::createUserProfileNotification(
+                        $db,
+                        $userId,
+                        $user['email'],
+                        $changes
+                    );
+                    
+                    if ($notificationResult) {
+                        error_log("System notification created for user profile update: {$user['email']}");
+                    }
+                    
+                    // Also create a notification for the user themselves
+                    NotificationHelper::create(
+                        $db,
+                        $userId,
+                        'system',
+                        'Profile Updated',
+                        'Your profile has been updated successfully',
+                        '/account/edit.php'
+                    );
+                }
+                
+            } catch (Exception $e) {
+                error_log("Failed to create system notification for profile update: " . $e->getMessage());
+                // Don't show error to user - notification failure shouldn't break the update
+            }
+            // ========== END SYSTEM NOTIFICATION ==========
+            
             // Refresh user data
             $stmt = $db->prepare("SELECT * FROM users WHERE id = ?");
             $stmt->execute([$userId]);
@@ -101,7 +164,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 require_once __DIR__ . '/../includes/header.php';
 ?>
-
 <div class="container-fluid py-4">
     <!-- Breadcrumb -->
     <nav aria-label="breadcrumb" class="mb-4">
@@ -155,6 +217,7 @@ require_once __DIR__ . '/../includes/header.php';
             </ul>
             <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
         </div>
+
     <?php endif; ?>
     
     <div class="row justify-content-center">

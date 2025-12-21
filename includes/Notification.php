@@ -9,38 +9,86 @@ class Notification {
     }
     
     // Create a new notification
-    public function create($user_id, $type, $title, $message, $link = null) {
+    // Create a new notification with order ID support
+    public function create($user_id, $type, $title, $message, $link = null, $order_id = null) {
         try {
+            // If order_id is provided but link is not, create auto link
+            if ($order_id && !$link && $type == 'order') {
+                $link = 'admin/orders.php?id=' . $order_id;
+            }
+            // If order_id is provided and we need to extract from message
+            elseif (!$order_id && $type == 'order') {
+                // Try to extract order ID from message (e.g., "New order #ORD123")
+                preg_match('/#(\w+)/', $message, $matches);
+                if ($matches && !$link) {
+                    // We need to find the actual order ID from the order number
+                    $link = 'admin/orders.php?search=' . urlencode($matches[1]);
+                }
+            }
+            
             $stmt = $this->db->prepare("
-                INSERT INTO notifications (user_id, type, title, message, link) 
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO notifications (user_id, type, title, message, link, order_id, created_at) 
+                VALUES (?, ?, ?, ?, ?, ?, NOW())
             ");
-            return $stmt->execute([$user_id, $type, $title, $message, $link]);
+            return $stmt->execute([$user_id, $type, $title, $message, $link, $order_id]);
         } catch (Exception $e) {
             error_log("Notification create error: " . $e->getMessage());
             return false;
         }
     }
     
-    // Get notifications for ALL admins (shows all notifications regardless of user_id)
+    // Get notifications for ALL admins with order info
     public function getNotifications($limit = 10, $unread_only = false) {
         try {
-            $sql = "SELECT * FROM notifications WHERE 1=1";
+            $sql = "SELECT n.*, o.order_number 
+                    FROM notifications n
+                    LEFT JOIN orders o ON n.order_id = o.id 
+                    WHERE 1=1";
             
             if ($unread_only) {
-                $sql .= " AND is_read = 0";
+                $sql .= " AND n.is_read = 0";
             }
             
-            $sql .= " ORDER BY created_at DESC LIMIT ?";
+            $sql .= " ORDER BY n.created_at DESC LIMIT ?";
             
             $stmt = $this->db->prepare($sql);
             $stmt->execute([$limit]);
             return $stmt->fetchAll();
         } catch (Exception $e) {
             error_log("Notification get error: " . $e->getMessage());
-            return [];
+            
+            // Fallback to simple query if join fails
+            $sql = "SELECT * FROM notifications WHERE 1=1";
+            if ($unread_only) {
+                $sql .= " AND is_read = 0";
+            }
+            $sql .= " ORDER BY created_at DESC LIMIT ?";
+            
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute([$limit]);
+            return $stmt->fetchAll();
         }
     }
+    
+    // Get notifications for ALL admins (shows all notifications regardless of user_id)
+    // public function getNotifications($limit = 10, $unread_only = false) {
+    //     try {
+    //         $sql = "SELECT * FROM notifications WHERE 1=1";
+            
+    //         if ($unread_only) {
+    //             $sql .= " AND is_read = 0";
+    //         }
+            
+    //         $sql .= " ORDER BY created_at DESC LIMIT ?";
+            
+    //         $stmt = $this->db->prepare($sql);
+    //         $stmt->execute([$limit]);
+    //         return $stmt->fetchAll();
+    //     } catch (Exception $e) {
+    //         error_log("Notification get error: " . $e->getMessage());
+    //         return [];
+    //     }
+    // }
     
     // Get unread count for ALL admins (counts all unread notifications)
     public function getUnreadCount() {
@@ -167,5 +215,37 @@ class Notification {
             return 'Recently';
         }
     }
+     public static function generateLink($notification) {
+        if (!empty($notification['link'])) {
+            return SITE_URL . ltrim($notification['link'], '/');
+        }
+        
+        // Auto-generate links for order notifications
+        if ($notification['type'] == 'order') {
+            // If we have order_id in the notification
+            if (!empty($notification['order_id'])) {
+                return SITE_URL . 'admin/orders.php?id=' . $notification['order_id'];
+            }
+            
+            // Try to extract order ID from message
+            preg_match('/#(\w+)/', $notification['message'], $matches);
+            if ($matches) {
+                return SITE_URL . 'admin/orders.php?search=' . urlencode($matches[1]);
+            }
+        }
+        
+        // Default links for other types
+        switch ($notification['type']) {
+            case 'user':
+                return SITE_URL . 'admin/users.php';
+            case 'payment':
+                return SITE_URL . 'admin/payments.php';
+            case 'stock':
+                return SITE_URL . 'admin/products.php';
+            default:
+                return '#';
+        }
+    }
 }
+
 ?>

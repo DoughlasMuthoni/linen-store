@@ -1,5 +1,5 @@
 <?php
-// /linen-closet/ajax/calculate-shipping.php - PRODUCTION VERSION
+// /linen-closet/ajax/calculate-shipping.php - FREE SHIPPING VERSION
 
 ini_set('display_errors', 0);
 error_reporting(E_ALL);
@@ -51,23 +51,23 @@ try {
     
     $prefix = substr($postalCode, 0, 3);
     
-    // Shipping zones configuration
+    // Shipping zones configuration - ALL FREE
     $shippingZones = [
-        '001' => ['name' => 'Nairobi CBD', 'rate' => 200, 'free_over' => 3000, 'days' => 1],
-        '002' => ['name' => 'Westlands', 'rate' => 250, 'free_over' => 4000, 'days' => 1],
-        '005' => ['name' => 'Karen/Langata', 'rate' => 300, 'free_over' => 5000, 'days' => 2],
-        '006' => ['name' => 'Mombasa Island', 'rate' => 500, 'free_over' => 8000, 'days' => 3],
-        '010' => ['name' => 'Nakuru', 'rate' => 400, 'free_over' => 6000, 'days' => 2],
-        '020' => ['name' => 'Kisumu', 'rate' => 450, 'free_over' => 6000, 'days' => 3],
+        '001' => ['name' => 'Nairobi CBD', 'rate' => 0, 'free_over' => 0, 'days' => 1],
+        '002' => ['name' => 'Westlands', 'rate' => 0, 'free_over' => 0, 'days' => 1],
+        '005' => ['name' => 'Karen/Langata', 'rate' => 0, 'free_over' => 0, 'days' => 2],
+        '006' => ['name' => 'Mombasa Island', 'rate' => 0, 'free_over' => 0, 'days' => 3],
+        '010' => ['name' => 'Nakuru', 'rate' => 0, 'free_over' => 0, 'days' => 2],
+        '020' => ['name' => 'Kisumu', 'rate' => 0, 'free_over' => 0, 'days' => 3],
     ];
     
-    // Default zone
-    $defaultZone = ['name' => 'Other Areas', 'rate' => 600, 'free_over' => 10000, 'days' => 5];
+    // Default zone - ALSO FREE
+    $defaultZone = ['name' => 'Other Areas', 'rate' => 0, 'free_over' => 0, 'days' => 5];
     
     $zone = $shippingZones[$prefix] ?? $defaultZone;
     
-    // Calculate shipping
-    $shipping = ($subtotal >= $zone['free_over']) ? 0 : $zone['rate'];
+    // Calculate shipping - ALWAYS FREE
+    $shipping = 0; // Always free
     
     echo json_encode([
         'success' => true,
@@ -75,9 +75,7 @@ try {
         'shipping' => $shipping,
         'estimated_days' => $zone['days'],
         'free_over' => $zone['free_over'],
-        'message' => $shipping === 0 
-            ? 'Free shipping to ' . $zone['name'] 
-            : 'Shipping to ' . $zone['name'] . ': Ksh ' . number_format($shipping, 2)
+        'message' => '🎉 FREE shipping to ' . $zone['name'] . '!'
     ]);
     
 } catch (Exception $e) {

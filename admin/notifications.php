@@ -10,7 +10,40 @@ require_once __DIR__ . '/../includes/Notification.php';
 $app = new App();
 $db = $app->getDB();
 $notification = new Notification($db);
-
+// Helper function to generate proper notification links
+function generateNotificationLink($notification) {
+    global $SITE_URL; // Make sure SITE_URL is accessible
+    
+    $link = '';
+    $title = 'View';
+    
+    if ($notification['type'] == 'order') {
+        // For order notifications, always point to orders.php
+        if (!empty($notification['order_id'])) {
+            $link = SITE_URL . 'admin/orders.php?id=' . $notification['order_id'];
+            $title = 'View Order #' . $notification['order_id'];
+        } else {
+            // Try to extract order number from message
+            preg_match('/#(\w+)/', $notification['message'], $matches);
+            if ($matches) {
+                $link = SITE_URL . 'admin/orders.php?search=' . urlencode($matches[1]);
+                $title = 'View Order ' . $matches[1];
+            } else {
+                // Default orders page
+                $link = SITE_URL . 'admin/orders.php';
+                $title = 'View Orders';
+            }
+        }
+    } elseif (!empty($notification['link'])) {
+        $link = SITE_URL . ltrim($notification['link'], '/');
+        $title = 'View';
+    }
+    
+    return $link ? 
+        '<a href="' . $link . '" class="btn btn-outline-primary" title="' . htmlspecialchars($title) . '">
+            <i class="fas fa-eye"></i>
+        </a>' : '';
+}
 // Handle actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['action'])) {
@@ -192,19 +225,19 @@ $content = '
             </div>
         </div>
         <div class="col-md-3">
-            <div class="card bg-purple text-white">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <h6 class="mb-0">Reviews</h6>
-                            <h3 class="mb-0">' . ($type_counts['review']['total'] ?? 0) . '</h3>
-                            <small>(' . ($type_counts['review']['unread'] ?? 0) . ' unread)</small>
-                        </div>
-                        <i class="fas fa-star fa-2x opacity-50"></i>
+    <div class="card bg-purple text-white">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="mb-0">Reviews</h6>
+                        <h3 class="mb-0">' . ($type_counts['review']['total'] ?? 0) . '</h3>
+                        <small>(' . ($type_counts['review']['unread'] ?? 0) . ' unread)</small>
                     </div>
+                    <i class="fas fa-star fa-2x opacity-50"></i>
                 </div>
             </div>
         </div>
+    </div>
     </div>
     
     <!-- Notifications List -->
@@ -285,10 +318,7 @@ if (empty($notifications)) {
             </td>
             <td>
                 <div class="btn-group btn-group-sm">
-                    ' . ($notif['link'] ? 
-                    '<a href="' . SITE_URL . ltrim($notif['link'], '/') . '" class="btn btn-outline-primary" title="View">
-                        <i class="fas fa-eye"></i>
-                    </a>' : '') . '
+                    ' . generateNotificationLink($notif) . '
                     <form method="POST" class="d-inline">
                         <input type="hidden" name="action" value="delete">
                         <input type="hidden" name="id" value="' . $notif['id'] . '">

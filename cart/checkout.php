@@ -9,6 +9,9 @@ require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/Database.php';
 require_once __DIR__ . '/../includes/App.php';
 
+// ADD THIS: Include Notification Helper
+require_once __DIR__ . '/../includes/NotificationHelper.php';
+
 $app = new App();
 $db = $app->getDB();
 
@@ -41,9 +44,16 @@ $cart = $_SESSION['cart'];
 $productIds = array_keys($cart);
 $placeholders = str_repeat('?,', count($productIds) - 1) . '?';
 
+// FIXED: Include min_stock_level in the query
 $stmt = $db->prepare("
     SELECT 
-        p.*,
+        p.id,
+        p.name,
+        p.price,
+        p.stock_quantity,
+        p.min_stock_level,  -- CRITICAL: Add this
+        p.sku,
+        p.is_active,
         (SELECT image_url FROM product_images pi WHERE pi.product_id = p.id AND pi.is_primary = 1 LIMIT 1) as primary_image
     FROM products p
     WHERE p.id IN ($placeholders) AND p.is_active = 1
@@ -95,7 +105,7 @@ try {
     $user = [];
 }
 
-// ========== NEW: Fetch user addresses from user_addresses table ==========
+// ========== Fetch user addresses from user_addresses table ==========
 try {
     $addressStmt = $db->prepare("
         SELECT * FROM user_addresses 
@@ -108,22 +118,19 @@ try {
     $addresses = [];
     error_log("Error fetching addresses: " . $e->getMessage());
 }
-// ========== END NEW ==========
 
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Validate and process order
     $errors = [];
     
-    // ========== UPDATED: Validate shipping address ==========
-    // Check both saved address and new address
+    // Validate shipping address
     $hasSavedAddress = !empty($_POST['shipping_address_id']);
     $hasNewAddress = !empty($_POST['new_shipping_address']['address_line1']);
     
     if (!$hasSavedAddress && !$hasNewAddress) {
         $errors[] = 'Please select or enter a shipping address';
     }
-    // ========== END UPDATED ==========
     
     // Validate payment method
     if (empty($_POST['payment_method'])) {
@@ -135,7 +142,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $db->beginTransaction();
             
-            // ========== UPDATED: Determine shipping address ==========
+            // ========== Determine shipping address ==========
             if (!empty($_POST['shipping_address_id'])) {
                 // Use saved address
                 $addressId = intval($_POST['shipping_address_id']);
@@ -194,9 +201,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ]);
                 }
             }
-            // ========== END UPDATED ==========
             
-            // Insert order - MAKE SURE THIS MATCHES YOUR TABLE STRUCTURE
+            // Insert order
             $orderStmt = $db->prepare("
                 INSERT INTO orders (
                     order_number, 
@@ -219,13 +225,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $user['id'] ?? 0,
                 $total,
                 $shippingAddress,
-                $shippingAddress,  // Same as shipping for billing
+                $shippingAddress,
                 $status,
                 $_POST['payment_method'],
                 $payment_status
             ]);
             
             $orderId = $db->lastInsertId();
+            NotificationHelper::createPaymentNotification(
+                $db,
+                $orderId,
+                $orderNumber,
+                'pending', // initial status
+                $_POST['payment_method'],
+                $total
+            );
+
+          // ========== ADD ORDER NOTIFICATION ==========
+        try {
+            $customerName = ($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? '');
+            $customerName = trim($customerName) ?: 'Customer';
+            
+            // Use NotificationHelper to create order notification
+            NotificationHelper::createOrderNotification(
+                $db,
+                $orderId,
+                $orderNumber,
+                $customerName
+            );
+            
+            // Also create a notification for the customer
+            NotificationHelper::create(
+                $db,
+                $user['id'] ?? 0,
+                'order',
+                'Order Confirmed',
+                'Your order #' . $orderNumber . ' has been received',
+                '/orders/view.php?id=' . $orderId
+            );
+            
+        } catch (Exception $e) {
+            error_log('Order notification error: ' . $e->getMessage());
+        }
+        // ========== END ORDER NOTIFICATION ==========
             
             if ($orderId) {
                 // Store in session for confirmation page
@@ -266,6 +308,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         WHERE id = ?
                     ");
                     $updateStmt->execute([$item['quantity'], $item['quantity'], $product['id']]);
+                    
+                 // ========== STOCK NOTIFICATION ==========
+                try {
+                    // Calculate new stock
+                    $newStock = (int)$product['stock_quantity'] - (int)$item['quantity'];
+                    $minStock = (int)$product['min_stock_level'];
+                    
+                    // Create stock notification
+                    NotificationHelper::createStockNotification(
+                        $db,
+                        $product['id'],
+                        $product['name'],
+                        $newStock,
+                        $minStock
+                    );
+                    
+                } catch (Exception $e) {
+                    error_log('Stock notification error: ' . $e->getMessage());
+                }
+                // ========== END STOCK NOTIFICATION ==========
                 }
                 
                 $db->commit();
@@ -754,10 +816,10 @@ function updateShippingCost() {
     let shippingCost = 0;
     
     if (shippingMethod === 'standard') {
-        shippingCost = (subtotal >= 5000) ? 0 : 300;
+        shippingCost = (subtotal >= 5000) ? 0 : 0;
     } else if (shippingMethod === 'express') {
         shippingCost = 700;
-    }
+    }view
     
     // Update display
     const shippingSummary = document.getElementById('shippingSummary');
@@ -860,11 +922,7 @@ function showErrorModal(errors) {
     // Show modal
     const modal = new bootstrap.Modal(document.getElementById('errorModal'));
     modal.show();
-
-    
 }
-
-
 </script>
 
 <?php

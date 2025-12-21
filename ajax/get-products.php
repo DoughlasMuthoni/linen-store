@@ -59,8 +59,118 @@ try {
         $params['search'] = $params['q'];
     }
     
-    // Debug: Log received parameters
+        // Debug: Log received parameters
     error_log("Parameters: " . json_encode($params));
+    
+    // ============================================
+    // NEW: Handle POST requests for recently viewed
+    // ============================================
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $postData = json_decode(file_get_contents('php://input'), true);
+        
+        if (isset($postData['action']) && $postData['action'] === 'get_recently_viewed') {
+            $productIds = $postData['product_ids'] ?? [];
+            
+            if (empty($productIds)) {
+                $response = [
+                    'success' => false,
+                    'message' => 'No product IDs provided',
+                    'products' => []
+                ];
+                
+                ob_clean();
+                echo json_encode($response, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                ob_end_flush();
+                exit();
+            }
+            
+            // Convert IDs to comma-separated string for IN clause
+            $placeholders = str_repeat('?,', count($productIds) - 1) . '?';
+            
+            try {
+                require_once __DIR__ . '/../includes/Database.php';
+                $db = Database::getInstance();
+                $pdo = $db->getConnection();
+                
+                $stmt = $pdo->prepare("
+                    SELECT 
+                        p.*,
+                        c.name as category_name,
+                        c.slug as category_slug,
+                        (SELECT image_url FROM product_images pi WHERE pi.product_id = p.id AND pi.is_primary = 1 LIMIT 1) as primary_image,
+                        (SELECT SUM(stock_quantity) FROM product_variants pv WHERE pv.product_id = p.id) as total_stock
+                    FROM products p
+                    LEFT JOIN categories c ON p.category_id = c.id
+                    WHERE p.id IN ($placeholders) AND p.is_active = 1
+                    ORDER BY FIELD(p.id, " . $placeholders . ")
+                    LIMIT 8
+                ");
+                
+                // Execute with IDs twice (for WHERE and ORDER BY FIELD)
+                $stmt->execute(array_merge($productIds, $productIds));
+                $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                
+                // Format product data
+                $formattedProducts = [];
+                foreach ($products as $product) {
+                    $formattedProducts[] = [
+                        'id' => (int)$product['id'],
+                        'name' => $product['name'],
+                        'slug' => $product['slug'],
+                        'price' => (float)$product['price'],
+                        'original_price' => isset($product['compare_price']) ? (float)$product['compare_price'] : null,
+                        'price_numeric' => (float)$product['price'],
+                        'original_price_numeric' => isset($product['compare_price']) ? (float)$product['compare_price'] : null,
+                        'image_url' => $product['primary_image'] ?: 'assets/images/placeholder.jpg',
+                        'brand' => $product['brand_name'] ?? '',
+                        'brand_id' => (int)($product['brand_id'] ?? 0),
+                        'category' => $product['category_name'] ?? '',
+                        'category_id' => (int)($product['category_id'] ?? 0),
+                        'stock_status' => ($product['total_stock'] > 0) ? 'in-stock' : 'out-of-stock',
+                        'stock_quantity' => (int)$product['total_stock'],
+                        'description' => $product['description'] ?? '',
+                        'short_description' => substr($product['description'] ?? '', 0, 100) . '...',
+                        'rating' => (float)($product['rating'] ?? 0),
+                        'review_count' => (int)($product['review_count'] ?? 0),
+                        'sizes' => [], // You would need to fetch sizes separately
+                        'colors' => [], // You would need to fetch colors separately
+                        'tags' => [] // You would need to fetch tags separately
+                    ];
+                }
+                
+                $response = [
+                    'success' => true,
+                    'message' => 'Recently viewed products fetched successfully',
+                    'products' => $formattedProducts,
+                    'count' => count($formattedProducts)
+                ];
+                
+                ob_clean();
+                echo json_encode($response, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                ob_end_flush();
+                exit();
+                
+            } catch (Exception $e) {
+                error_log('Recently viewed error: ' . $e->getMessage());
+                
+                $response = [
+                    'success' => false,
+                    'message' => 'Error fetching recently viewed products',
+                    'products' => [],
+                    'error' => $e->getMessage()
+                ];
+                
+                ob_clean();
+                echo json_encode($response, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                ob_end_flush();
+                exit();
+            }
+        }
+    }
+    
+    // ============================================
+    // END OF NEW POST HANDLING
+    // ============================================
     
     // Sample product data - in production, this would come from a database
     $products = [

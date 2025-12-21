@@ -168,7 +168,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $productData['dimensions'],
             $productId
         ]);
-        
+        // After stock update
+        if ($originalStock != $newStock) {
+            NotificationHelper::createSystemNotification(
+                $db,
+                'Manual Stock Adjustment',
+                "Product {$productName} stock changed from $originalStock to $newStock",
+                "/admin/products/edit.php?id=$productId"
+            );
+        }
         // Handle image deletions
         if (isset($_POST['delete_images']) && is_array($_POST['delete_images'])) {
             foreach ($_POST['delete_images'] as $imageId) {

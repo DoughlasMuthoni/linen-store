@@ -232,7 +232,7 @@ $content = '
         </div>
         <div class="card-body">
             <div class="table-responsive">
-                <table class="table table-hover data-table">
+                <table class="table table-hover" id="categories-table">
                     <thead>
                         <tr>
                             <th>Category</th>
@@ -643,10 +643,29 @@ document.getElementById("name").addEventListener("input", function() {
         document.getElementById("slug").value = slug;
     }
 });
+
+</script>';
+
+// Add DataTables initialization script
+$content .= '
+<script>
+$(document).ready(function() {
+    // Initialize DataTables only if not already initialized
+    if ($.fn.DataTable && !$.fn.DataTable.isDataTable("#categories-table")) {
+        $("#categories-table").DataTable({
+            "pageLength": 25,
+            "order": [[0, "asc"]],
+            "columnDefs": [
+                { "orderable": false, "targets": [7] } // Make Actions column non-orderable
+            ],
+            "responsive": true
+        });
+    }
+});
 </script>';
 
 // ====================================================================
 // 6. OUTPUT THE LAYOUT
 // ====================================================================
 
-echo adminLayout($content, 'Category Management');
+echo adminLayout($content, 'Category Management' );
