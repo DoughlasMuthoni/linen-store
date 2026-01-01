@@ -58,8 +58,7 @@ function adminLayout($content, $pageTitle = 'Dashboard') {
         
         <!-- Admin Custom CSS -->
         <link href="<?php echo SITE_URL; ?>assets/css/admin.css" rel="stylesheet">
-        <!-- Sortable.js for drag and drop -->
-        <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.14.0/Sortable.min.js"></script>
+      
         <!-- Custom styles for this page -->
         <style>
             :root {
@@ -552,27 +551,27 @@ setInterval(updateTime, 60000);
             </main>
         </div>
         
-        <!-- Bootstrap JS -->
-        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-        
-        <!-- jQuery -->
-        <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
-        
-        <!-- DataTables -->
-        <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
-        <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
-        
-        <!-- Select2 -->
-        <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
-        
-        <!-- Chart.js -->
-        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-        
-        <!-- SweetAlert -->
-        <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-        
-        <!-- Admin Custom JS -->
-        <script src="<?php echo SITE_URL; ?>assets/js/admin.js"></script>
+        <!-- jQuery MUST come first -->
+    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+
+    <!-- Bootstrap JS (depends on jQuery) -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- SweetAlert (doesn't depend on jQuery, can go anywhere) -->
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <!-- DataTables (depends on jQuery) -->
+    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
+
+    <!-- Select2 (depends on jQuery) -->
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
+    <!-- Chart.js (doesn't depend on jQuery, can go anywhere) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- Sortable.js for drag and drop -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.14.0/Sortable.min.js"></script>
+    <!-- Admin Custom JS (depends on jQuery) -->
+    <script src="<?php echo SITE_URL; ?>assets/js/admin.js"></script>
         
         <!-- Page-specific scripts -->
         <script>

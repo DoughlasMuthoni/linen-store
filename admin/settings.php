@@ -79,7 +79,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     
     // Show success message
-    echo '<script>Swal.fire("Success!", "Settings updated successfully!", "success");</script>';
+    // echo '<script>Swal.fire("Success!", "Settings updated successfully!", "success");</script>';
+    // Show success message
+    echo '<script>alert("Settings updated successfully!");</script>';
 }
 
 // Get all settings
@@ -282,24 +284,30 @@ $content = '
                 </div>
                 
                 <!-- Shipping Settings Tab -->
+                 
                 <div class="tab-pane fade" id="shipping">
                     <div class="card">
-                        <div class="card-header">
+                        <div class="card-header d-flex justify-content-between align-items-center">
                             <h5 class="mb-0">Shipping Settings</h5>
+                           <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#addZoneModal">
+                                <i class="fas fa-plus me-1"></i> Add Shipping Zone
+                            </button>
                         </div>
-                        <form method="POST">
+                        <form method="POST" id="shippingSettingsForm">
                             <input type="hidden" name="section" value="shipping">
                             <div class="card-body">
                                 <div class="form-check form-switch mb-3">
                                     <input class="form-check-input" type="checkbox" 
                                            name="shipping_enabled" value="1" 
-                                           ' . (($settings['shipping_enabled'] ?? '0') == '1' ? 'checked' : '') . '>
-                                    <label class="form-check-label fw-bold">
+                                           ' . (($settings['shipping_enabled'] ?? '0') == '1' ? 'checked' : '') . ' 
+                                           id="shippingEnabled">
+                                    <label class="form-check-label fw-bold" for="shippingEnabled">
                                         Enable Shipping
                                     </label>
                                 </div>
                                 
-                                <div class="row g-3">
+                                <!-- Flat Rate Shipping -->
+                                <div class="row g-3 mb-4">
                                     <div class="col-md-6">
                                         <label class="form-label">Flat Rate Shipping (KES)</label>
                                         <input type="number" name="shipping_flat_rate" 
@@ -314,15 +322,82 @@ $content = '
                                                class="form-control" step="0.01" min="0">
                                         <small class="text-muted">Order amount for free shipping (0 to disable)</small>
                                     </div>
-                                    <div class="col-12">
-                                        <label class="form-label">Shipping Zones</label>
-                                        <textarea name="shipping_zones" class="form-control" rows="4" placeholder="Format: Zone Name, Cost
-Example:
-Nairobi, 200
-Mombasa, 400
-Rest of Kenya, 600
-International, 2000">' . htmlspecialchars($settings['shipping_zones'] ?? '') . '</textarea>
-                                        <small class="text-muted">Enter one zone per line in format: Zone Name, Cost</small>
+                                </div>
+                                
+                                <!-- Shipping Zones Table -->
+                                <div class="mb-4">
+                                    <h6>Shipping Zones</h6>
+                                    <div class="table-responsive">
+                                        <table class="table table-hover" id="zonesTable">
+                                            <thead>
+                                                <tr>
+                                                    <th width="50">ID</th>
+                                                    <th>Zone Name</th>
+                                                    <th>Cost (KES)</th>
+                                                    <th>Counties</th>
+                                                    <th>Towns/Areas</th>
+                                                    <th>Delivery Days</th>
+                                                    <th>Status</th>
+                                                    <th width="120">Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>';
+                                            
+// Fetch existing shipping zones from database
+$zonesQuery = $db->query("SELECT * FROM shipping_zones ORDER BY zone_name");
+$shippingZones = $zonesQuery->fetchAll();
+
+if (empty($shippingZones)) {
+    $content .= '<tr><td colspan="7" class="text-center text-muted py-4">No shipping zones found. Add your first zone.</td></tr>';
+} else {
+    foreach ($shippingZones as $zone) {
+        $content .= '
+        <tr data-zone-id="' . $zone['id'] . '">
+            <td>' . $zone['id'] . '</td>
+            <td>
+                <strong>' . htmlspecialchars($zone['zone_name']) . '</strong>
+                ' . ($zone['description'] ? '<br><small class="text-muted">' . htmlspecialchars($zone['description']) . '</small>' : '') . '
+            </td>
+            <td>KES ' . number_format($zone['cost'], 2) . '</td>
+           <td>
+                <small>' . (strlen($zone['counties']) > 30 ? substr(htmlspecialchars($zone['counties']), 0, 30) . '...' : htmlspecialchars($zone['counties'])) . '</small>
+            </td>
+            <td>
+                <small>' . (strlen($zone['towns_areas']) > 30 ? substr(htmlspecialchars($zone['towns_areas']), 0, 30) . '...' : htmlspecialchars($zone['towns_areas'])) . '</small>
+            </td>
+            <td>' . $zone['delivery_days'] . ' days</td>
+            <td>
+                <span class="badge bg-' . ($zone['is_active'] ? 'success' : 'secondary') . '">
+                    ' . ($zone['is_active'] ? 'Active' : 'Inactive') . '
+                </span>
+            </td>
+            <td>
+               <button type="button" class="btn btn-sm btn-outline-primary edit-zone" 
+                    data-id="' . $zone['id'] . '"
+                    data-name="' . htmlspecialchars($zone['zone_name']) . '"
+                    data-description="' . htmlspecialchars($zone['description'] ?? '') . '"
+                    data-cost="' . $zone['cost'] . '"
+                    data-countries="' . htmlspecialchars($zone['countries'] ?? '') . '"
+                    data-counties="' . htmlspecialchars($zone['counties'] ?? '') . '"
+                    data-towns-areas="' . htmlspecialchars($zone['towns_areas'] ?? ($zone['counties'] ?? '')) . '" 
+                    data-delivery-days="' . $zone['delivery_days'] . '"
+                    data-min-order="' . ($zone['min_order_amount'] ?? '0') . '"
+                    data-active="' . $zone['is_active'] . '">
+                <i class="fas fa-edit"></i>
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-danger delete-zone" 
+                        data-id="' . $zone['id'] . '"
+                        data-name="' . htmlspecialchars($zone['zone_name']) . '">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </td>
+        </tr>';
+    }
+}
+
+$content .= '
+                                            </tbody>
+                                        </table>
                                     </div>
                                 </div>
                             </div>
@@ -334,6 +409,81 @@ International, 2000">' . htmlspecialchars($settings['shipping_zones'] ?? '') . '
                         </form>
                     </div>
                 </div>
+                
+               <!-- Inside the Add/Edit Zone Modal -->
+<div class="modal fade" id="addZoneModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Shipping Zone</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="zoneForm">
+                <div class="modal-body">
+                    <input type="hidden" name="zone_id" id="zoneId">
+                    <input type="hidden" name="action" id="zoneAction" value="add">
+                    
+                    <div class="row g-3">
+                        <div class="col-md-12">
+                            <label class="form-label">Zone Name *</label>
+                            <input type="text" name="zone_name" id="zoneName" class="form-control" required>
+                        </div>
+                        <div class="col-md-12">
+                            <label class="form-label">Description</label>
+                            <textarea name="description" id="zoneDescription" class="form-control" rows="2"></textarea>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Shipping Cost (KES) *</label>
+                            <input type="number" name="cost" id="zoneCost" class="form-control" step="0.01" min="0" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Delivery Days *</label>
+                            <input type="number" name="delivery_days" id="zoneDeliveryDays" class="form-control" min="1" value="3" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Minimum Order Amount (KES)</label>
+                            <input type="number" name="min_order_amount" id="zoneMinOrder" class="form-control" step="0.01" min="0">
+                            <small class="text-muted">0 = no minimum</small>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Status</label>
+                            <select name="is_active" id="zoneActive" class="form-select">
+                                <option value="1">Active</option>
+                                <option value="0">Inactive</option>
+                            </select>
+                        </div>
+                        <div class="col-md-12">
+                            <label class="form-label">Countries (Optional)</label>
+                            <textarea name="countries" id="zoneCountries" class="form-control" rows="2" placeholder="Kenya,Tanzania,Uganda"></textarea>
+                            <small class="text-muted">Comma-separated list of countries</small>
+                        </div>
+                        
+                        <!-- NEW: Counties Field -->
+                        <div class="col-md-12">
+                            <label class="form-label">Counties *</label>
+                            <textarea name="counties" id="zoneCounties" class="form-control" rows="2" required placeholder="Nairobi, Kiambu, Mombasa, Kisumu"></textarea>
+                            <small class="text-muted">Comma-separated list of counties for checkout dropdown</small>
+                        </div>
+                        
+                        <!-- RENAMED: Towns/Areas Field (previously Counties) -->
+                        <div class="col-md-12">
+                            <label class="form-label">Towns/Areas *</label>
+                            <textarea name="towns_areas" id="zoneTownsAreas" class="form-control" rows="3" required placeholder="Nairobi CBD, Westlands, Kilimani
+Kiambu Town, Thika, Ruiru
+Mombasa Island, Nyali, Bamburi
+Kisumu CBD, Milimani, Kondele"></textarea>
+                            <small class="text-muted">One per line or comma-separated. Specific towns/areas served by this zone.</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Zone</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
                 
                 <!-- Email Settings Tab -->
                 <div class="tab-pane fade" id="email">
@@ -509,93 +659,314 @@ International, 2000">' . htmlspecialchars($settings['shipping_zones'] ?? '') . '
 </div>
 
 <script>
-$(document).ready(function() {
-    // Tab switching
-    $("#settings-nav a").on("click", function(e) {
-        e.preventDefault();
-        $("#settings-nav a").removeClass("active");
-        $(this).addClass("active");
-        $(".tab-pane").removeClass("show active");
-        $($(this).attr("href")).addClass("show active");
-    });
-    
-    // Toggle M-Pesa fields
-    function toggleMpesaFields() {
-        if ($("#mpesaEnabled").is(":checked")) {
-            $("#mpesaFields").show();
-        } else {
-            $("#mpesaFields").hide();
+// Load jQuery if not already loaded
+if (typeof jQuery === \'undefined\') {
+    var script = document.createElement(\'script\');
+    script.src = \'https://code.jquery.com/jquery-3.7.0.min.js\';
+    script.onload = function() {
+        // jQuery loaded, now run our code
+        initMyScript();
+    };
+    document.head.appendChild(script);
+} else {
+    // jQuery already loaded
+    initMyScript();
+}
+
+function initMyScript() {
+    $(document).ready(function() {
+        // Tab switching
+        $("#settings-nav a").on("click", function(e) {
+            e.preventDefault();
+            $("#settings-nav a").removeClass("active");
+            $(this).addClass("active");
+            $(".tab-pane").removeClass("show active");
+            $($(this).attr("href")).addClass("show active");
+        });
+        
+        // Toggle M-Pesa fields
+        function toggleMpesaFields() {
+            if ($("#mpesaEnabled").is(":checked")) {
+                $("#mpesaFields").show();
+            } else {
+                $("#mpesaFields").hide();
+            }
         }
+        
+        $("#mpesaEnabled").on("change", toggleMpesaFields);
+        toggleMpesaFields(); // Initial state
+        
+        // Test M-Pesa Connection
+        $("#testMpesa").on("click", function() {
+            Swal.fire({
+                title: "Testing M-Pesa Connection",
+                text: "This will test your M-Pesa API credentials...",
+                icon: "info",
+                showCancelButton: true,
+                confirmButtonText: "Test Now"
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    // AJAX call to test M-Pesa
+                    Swal.fire({
+                        title: "Testing...",
+                        text: "Please wait while we test the connection",
+                        allowOutsideClick: false,
+                        didOpen: function() {
+                            Swal.showLoading();
+                        }
+                    });
+                    
+                    // Simulate API test (replace with actual AJAX call)
+                    setTimeout(function() {
+                        Swal.fire({
+                            title: "Test Complete",
+                            text: "M-Pesa connection test successful!",
+                            icon: "success"
+                        });
+                    }, 1500);
+                }
+            });
+        });
+        
+        // Test Email
+        $("#testEmail").on("click", function() {
+            Swal.fire({
+                title: "Send Test Email",
+                input: "email",
+                inputLabel: "Enter email address to send test to",
+                inputPlaceholder: "test@example.com",
+                showCancelButton: true,
+                confirmButtonText: "Send Test"
+            }).then((result) => {
+                if (result.isConfirmed && result.value) {
+                    // AJAX call to send test email
+                    Swal.fire({
+                        title: "Sending...",
+                        text: "Sending test email to " + result.value,
+                        allowOutsideClick: false,
+                        didOpen: function() {
+                            Swal.showLoading();
+                        }
+                    });
+                    
+                    // Simulate email send (replace with actual AJAX)
+                    setTimeout(function() {
+                        Swal.fire({
+                            title: "Sent!",
+                            text: "Test email has been sent to " + result.value,
+                            icon: "success"
+                        });
+                    }, 2000);
+                }
+            });
+        });
+        
+        // Shipping Zones Management
+        const zoneModal = new bootstrap.Modal(document.getElementById(\'addZoneModal\'));
+        
+        // Open Add Zone Modal when button is clicked
+        $("button[data-bs-target=\'#addZoneModal\']").on("click", function() {
+            document.getElementById(\'addZoneModal\').querySelector(\'.modal-title\').textContent = \'Add Shipping Zone\';
+            document.getElementById(\'zoneForm\').reset();
+            document.getElementById(\'zoneId\').value = \'\';
+            document.getElementById(\'zoneAction\').value = \'add\';
+            // Set default values
+            document.getElementById(\'zoneDeliveryDays\').value = \'3\';
+            document.getElementById(\'zoneActive\').value = \'1\';
+            zoneModal.show();
+        });
+        
+   // Edit Zone
+        $(document).on("click", ".edit-zone", function() {
+            const btn = $(this);
+            document.getElementById(\'addZoneModal\').querySelector(\'.modal-title\').textContent = \'Edit Shipping Zone\';
+            document.getElementById(\'zoneId\').value = btn.data(\'id\');
+            document.getElementById(\'zoneName\').value = btn.data(\'name\');
+            document.getElementById(\'zoneDescription\').value = btn.data(\'description\');
+            document.getElementById(\'zoneCost\').value = btn.data(\'cost\');
+            document.getElementById(\'zoneCountries\').value = btn.data(\'countries\');
+            document.getElementById(\'zoneCounties\').value = btn.data(\'counties\');
+            
+            // Try multiple ways to get towns_areas data since jQuery handles data attributes differently
+            let townsAreas = btn.data(\'towns-areas\') || btn.data(\'townsAreas\') || btn.data(\'towns_areas\') || \'\';
+            document.getElementById(\'zoneTownsAreas\').value = townsAreas;
+            
+            document.getElementById(\'zoneDeliveryDays\').value = btn.data(\'delivery-days\');
+            document.getElementById(\'zoneMinOrder\').value = btn.data(\'min-order\');
+            document.getElementById(\'zoneActive\').value = btn.data(\'active\');
+            document.getElementById(\'zoneAction\').value = \'edit\';
+            zoneModal.show();
+        });
+        
+        // Delete Zone
+        $(document).on("click", ".delete-zone", function() {
+            const btn = $(this);
+            Swal.fire({
+                title: \'Delete Zone?\',
+                html: \'Are you sure you want to delete <strong>\' + btn.data(\'name\') + \'</strong>?\',
+                icon: \'warning\',
+                showCancelButton: true,
+                confirmButtonText: \'Delete\',
+                cancelButtonText: \'Cancel\'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    // Show loading
+                    Swal.fire({
+                        title: \'Deleting...\',
+                        text: \'Please wait\',
+                        allowOutsideClick: false,
+                        didOpen: function() {
+                            Swal.showLoading();
+                        }
+                    });
+                    
+                    // AJAX call to delete zone
+                    $.ajax({
+                        url: "ajax/shipping_zones.php",
+                        method: "POST",
+                        data: {
+                            action: "delete",
+                            zone_id: btn.data(\'id\')
+                        },
+                        dataType: "json",
+                        success: function(data) {
+                            if (data.success) {
+                                Swal.fire({
+                                    title: \'Deleted!\',
+                                    text: \'Shipping zone has been deleted.\',
+                                    icon: \'success\',
+                                    timer: 1500,
+                                    showConfirmButton: false
+                                }).then(function() {
+                                    // Remove row from table
+                                    $("tr[data-zone-id=\'" + btn.data(\'id\') + "\']").remove();
+                                    
+                                    // If no rows left, show empty message
+                                    if ($("#zonesTable tbody tr").length === 0) {
+                                        $("#zonesTable tbody").html(
+                                            \'<tr><td colspan="7" class="text-center text-muted py-4">No shipping zones found. Add your first zone.</td></tr>\'
+                                        );
+                                    }
+                                });
+                            } else {
+                                Swal.fire(\'Error!\', data.message || \'Failed to delete zone.\', \'error\');
+                            }
+                        },
+                        error: function() {
+                            Swal.fire(\'Error!\', \'Network error occurred.\', \'error\');
+                        }
+                    });
+                }
+            });
+        });
+        
+        // Save Zone Form
+document.getElementById(\'zoneForm\').addEventListener(\'submit\', function(e) {
+    e.preventDefault();
+    
+    // Validate required fields before submitting
+    const zoneName = document.getElementById(\'zoneName\').value.trim();
+    const zoneCost = document.getElementById(\'zoneCost\').value.trim();
+    const zoneCounties = document.getElementById(\'zoneCounties\').value.trim();
+    const zoneTownsAreas = document.getElementById(\'zoneTownsAreas\').value.trim();
+    
+    if (!zoneName || !zoneCost || !zoneCounties || !zoneTownsAreas) {
+        Swal.fire(\'Validation Error!\', \'Please fill all required fields: Zone Name, Cost, Counties, and Towns/Areas.\', \'error\');
+        return;
     }
     
-    $("#mpesaEnabled").on("change", toggleMpesaFields);
-    toggleMpesaFields(); // Initial state
-    
-    // Test M-Pesa Connection
-    $("#testMpesa").on("click", function() {
-        Swal.fire({
-            title: "Testing M-Pesa Connection",
-            text: "This will test your M-Pesa API credentials...",
-            icon: "info",
-            showCancelButton: true,
-            confirmButtonText: "Test Now"
-        }).then((result) => {
-            if (result.isConfirmed) {
-                // AJAX call to test M-Pesa
-                Swal.fire({
-                    title: "Testing...",
-                    text: "Please wait while we test the connection",
-                    allowOutsideClick: false,
-                    didOpen: () => {
-                        Swal.showLoading();
-                    }
-                });
-                
-                // Simulate API test (replace with actual AJAX call)
-                setTimeout(() => {
-                    Swal.fire({
-                        title: "Test Complete",
-                        text: "M-Pesa connection test successful!",
-                        icon: "success"
-                    });
-                }, 1500);
-            }
-        });
+    // Show loading
+    Swal.fire({
+        title: \'Saving...\',
+        text: \'Please wait\',
+        allowOutsideClick: false,
+        didOpen: function() {
+            Swal.showLoading();
+        }
     });
     
-    // Test Email
-    $("#testEmail").on("click", function() {
+    const formData = new FormData(this);
+    
+    // Use fetch for FormData support
+    fetch(\'ajax/shipping_zones.php\', {
+        method: \'POST\',
+        body: formData
+    })
+    .then(function(response) {
+        // First, check if the response is JSON
+        const contentType = response.headers.get(\'content-type\');
+        if (!contentType || !contentType.includes(\'application/json\')) {
+            // Not JSON, try to get text for debugging
+            return response.text().then(function(text) {
+                throw new Error(\'Invalid JSON response: \' + text.substring(0, 200));
+            });
+        }
+        
+        // Check if response is OK (status 200-299)
+        if (!response.ok) {
+            return response.json().then(function(data) {
+                throw new Error(data.message || \'Server error: \' + response.status);
+            });
+        }
+        
+        return response.json();
+    })
+    .then(function(data) {
+        if (data.success) {
+            Swal.fire({
+                title: \'Success!\',
+                text: data.message || \'Zone saved successfully.\',
+                icon: \'success\',
+                timer: 1500,
+                showConfirmButton: false
+            }).then(function() {
+                zoneModal.hide();
+                // Refresh page to show updated zones
+                location.reload();
+            });
+        } else {
+            Swal.fire({
+                title: \'Error!\',
+                html: data.message ? data.message.replace(/\\n/g, \'<br>\') : \'Failed to save zone.\',
+                icon: \'error\'
+            });
+        }
+    })
+    .catch(function(error) {
+        console.error(\'Error details:\', error);
+        
+        // More detailed error messages
+        let errorMessage = \'Network error occurred.\';
+        let errorTitle = \'Error!\';
+        
+        if (error.message.includes(\'Invalid JSON response\')) {
+            errorTitle = \'Server Configuration Error\';
+            errorMessage = \'The server returned an invalid response. This usually means:<br><br>\' +
+                          \'1. PHP errors are being displayed<br>\' +
+                          \'2. Database connection failed<br>\' +
+                          \'3. Missing or incorrect PHP includes<br><br>\' +
+                          \'<small>Check your server error logs for details.</small>\';
+        } else if (error.message.includes(\'Server error\')) {
+            errorTitle = \'Server Error\';
+            errorMessage = error.message.replace(\'Server error: \', \'HTTP \') + \'<br><br>Please try again or contact support.\';
+        } else if (error.message) {
+            errorMessage = error.message;
+        }
+        
         Swal.fire({
-            title: "Send Test Email",
-            input: "email",
-            inputLabel: "Enter email address to send test to",
-            inputPlaceholder: "test@example.com",
-            showCancelButton: true,
-            confirmButtonText: "Send Test"
-        }).then((result) => {
-            if (result.isConfirmed && result.value) {
-                // AJAX call to send test email
-                Swal.fire({
-                    title: "Sending...",
-                    text: "Sending test email to " + result.value,
-                    allowOutsideClick: false,
-                    didOpen: () => {
-                        Swal.showLoading();
-                    }
-                });
-                
-                // Simulate email send (replace with actual AJAX)
-                setTimeout(() => {
-                    Swal.fire({
-                        title: "Sent!",
-                        text: "Test email has been sent to " + result.value,
-                        icon: "success"
-                    });
-                }, 2000);
-            }
+            title: errorTitle,
+            html: errorMessage,
+            icon: \'error\',
+            width: 600
         });
+    }).finally(function() {
+        // Re-enable form if needed
+        const submitBtn = document.querySelector(\'#zoneForm button[type="submit"]\');
+        if (submitBtn) submitBtn.disabled = false;
     });
 });
+    });
+}
 </script>
 ';
 

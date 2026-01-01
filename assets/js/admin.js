@@ -1,8 +1,6 @@
-// /linen-closet/assets/js/admin.js - Add these functions
-
 // Mark notification as read
 function markAsRead(notificationId) {
-    fetch('<?php echo SITE_URL; ?>admin/ajax/notifications.php?action=mark_read&id=' + notificationId)
+    fetch('../admin/ajax/notifications.php?action=mark_read&id=' + notificationId)
         .then(response => response.json())
         .then(data => {
             if (data.success) {
@@ -38,7 +36,7 @@ function markAsRead(notificationId) {
 
 // Mark all as read
 function markAllAsRead() {
-    fetch('<?php echo SITE_URL; ?>admin/ajax/notifications.php?action=mark_all_read')
+    fetch('../admin/ajax/notifications.php?action=mark_all_read')
         .then(response => response.json())
         .then(data => {
             if (data.success) {
@@ -75,30 +73,30 @@ function markAllAsRead() {
 }
 
 // Check for new notifications periodically
-function checkNewNotifications() {
-    fetch('<?php echo SITE_URL; ?>admin/ajax/notifications.php?action=check_unread')
-        .then(response => response.json())
-        .then(data => {
-            if (data.success && data.count > 0) {
-                let bell = document.getElementById('notificationBell');
-                let currentCount = parseInt(bell.dataset.unread) || 0;
+// function checkNewNotifications() {
+//     fetch('../admin/ajax/notifications.php?action=check_unread')
+//         .then(response => response.json())
+//         .then(data => {
+//             if (data.success && data.count > 0) {
+//                 let bell = document.getElementById('notificationBell');
+//                 let currentCount = parseInt(bell.dataset.unread) || 0;
                 
-                if (data.count !== currentCount) {
-                    updateNotificationCount(data.count);
+//                 if (data.count !== currentCount) {
+//                     updateNotificationCount(data.count);
                     
-                    // Show desktop notification if browser supports it
-                    if (data.count > currentCount && "Notification" in window) {
-                        if (Notification.permission === "granted") {
-                            new Notification("New Notification", {
-                                body: "You have " + data.count + " unread notifications",
-                                icon: "<?php echo SITE_URL; ?>assets/images/logo.png"
-                            });
-                        }
-                    }
-                }
-            }
-        });
-}
+//                     // Show desktop notification if browser supports it
+//                     if (data.count > currentCount && "Notification" in window) {
+//                         if (Notification.permission === "granted") {
+//                             new Notification("New Notification", {
+//                                 body: "You have " + data.count + " unread notifications",
+//                                 icon: "../assets/images/logo.png"
+//                             });
+//                         }
+//                     }
+//                 }
+//             }
+//         });
+// }
 
 // Update notification count in UI
 function updateNotificationCount(count) {

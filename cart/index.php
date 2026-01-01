@@ -4,7 +4,7 @@
 require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/Database.php';
 require_once __DIR__ . '/../includes/App.php';
-
+require_once __DIR__ . '/../includes/Shipping.php';
 $app = new App();
 $db = $app->getDB();
 
@@ -110,12 +110,17 @@ if (!empty($cart)) {
             }
         }
         
-        // Calculate shipping (example: free over 5000, otherwise 300)
-        $shipping = ($subtotal >= 5000) ? 0 : 300;
-        
-        // Calculate tax (example: 16% VAT)
+       
+       
+        $shippingHelper = new Shipping($db);
+
+        // Get shipping cost (default to Nairobi or get from session)
+        $userCounty = $_SESSION['user']['county'] ?? 'Nairobi';
+        $shippingInfo = $shippingHelper->calculateShipping($userCounty, $subtotal);
+
+        $shipping = $shippingInfo['cost'];
+        $shippingMessage = $shippingInfo['message'] ?? 'Standard shipping'; // Add default message
         $tax = $subtotal * 0.16;
-        
         $total = $subtotal + $shipping + $tax;
     }
 }
@@ -476,13 +481,15 @@ require_once __DIR__ . '/../includes/header.php';
                                     Ksh <?php echo number_format($subtotal, 2); ?>
                                 </span>
                             </div>
-                            <div class="d-flex justify-content-between mb-2">
+                           <div class="d-flex justify-content-between mb-2">
                                 <span class="text-muted">Shipping</span>
                                 <span class="fw-bold text-blue" id="shippingAmount">
                                     <?php if ($shipping > 0): ?>
                                         Ksh <?php echo number_format($shipping, 2); ?>
+                                        <small class="d-block text-muted"><?php echo $shippingMessage; ?></small>
                                     <?php else: ?>
                                         <span class="text-success">FREE</span>
+                                        <small class="d-block text-muted"><?php echo $shippingMessage; ?></small>
                                     <?php endif; ?>
                                 </span>
                             </div>
@@ -502,7 +509,7 @@ require_once __DIR__ . '/../includes/header.php';
                         </div>
                         
                         <!-- Shipping Estimate -->
-                        <div class="mb-4">
+                        <!-- <div class="mb-4">
                             <h6 class="fw-bold mb-3 text-blue">
                                 <i class="fas fa-truck me-2"></i> Shipping Estimate
                             </h6>
@@ -516,7 +523,7 @@ require_once __DIR__ . '/../includes/header.php';
                                 </button>
                             </div>
                             <div id="shippingEstimateResult" class="mt-2"></div>
-                        </div>
+                        </div> -->
                         
                         <!-- Discount Code -->
                         <div class="mb-4">
@@ -954,64 +961,64 @@ async function clearCart() {
 }
 
 // Calculate shipping
-async function calculateShipping() {
-    const postalCode = document.getElementById('postalCode').value.trim();
-    const subtotal = <?php echo $subtotal; ?>;
+// async function calculateShipping() {
+//     const postalCode = document.getElementById('postalCode').value.trim();
+//     const subtotal = <?php echo $subtotal; ?>;
     
-    if (!postalCode) {
-        showToast('Please enter a postal code', 'error');
-        return;
-    }
+//     if (!postalCode) {
+//         showToast('Please enter a postal code', 'error');
+//         return;
+//     }
     
-    try {
-        const response = await fetch('<?php echo SITE_URL; ?>ajax/calculate-shipping.php', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                postal_code: postalCode,
-                subtotal: subtotal
-            })
-        });
+//     try {
+//         const response = await fetch('<?php echo SITE_URL; ?>ajax/calculate-shipping.php', {
+//             method: 'POST',
+//             headers: {
+//                 'Content-Type': 'application/json',
+//             },
+//             body: JSON.stringify({
+//                 postal_code: postalCode,
+//                 subtotal: subtotal
+//             })
+//         });
         
-        const data = await response.json();
-        const resultDiv = document.getElementById('shippingEstimateResult');
+//         const data = await response.json();
+//         const resultDiv = document.getElementById('shippingEstimateResult');
         
-        if (data.success) {
-            resultDiv.innerHTML = `
-                <div class="alert alert-success p-2 mb-0">
-                    <i class="fas fa-check-circle me-2"></i>
-                    Shipping to ${data.area}: ${data.shipping === 0 ? 'FREE' : 'Ksh ' + data.shipping.toFixed(2)}
-                    <br><small>Estimated delivery: ${data.estimated_days} business days</small>
-                </div>
-            `;
+//         if (data.success) {
+//             resultDiv.innerHTML = `
+//                 <div class="alert alert-success p-2 mb-0">
+//                     <i class="fas fa-check-circle me-2"></i>
+//                     Shipping to ${data.area}: ${data.shipping === 0 ? 'FREE' : 'Ksh ' + data.shipping.toFixed(2)}
+//                     <br><small>Estimated delivery: ${data.estimated_days} business days</small>
+//                 </div>
+//             `;
             
-            // Update shipping in summary
-            if (document.getElementById('shippingAmount')) {
-                document.getElementById('shippingAmount').innerHTML = data.shipping === 0 
-                    ? '<span class="text-success">FREE</span>' 
-                    : 'Ksh ' + data.shipping.toFixed(2);
+//             // Update shipping in summary
+//             if (document.getElementById('shippingAmount')) {
+//                 document.getElementById('shippingAmount').innerHTML = data.shipping === 0 
+//                     ? '<span class="text-success">FREE</span>' 
+//                     : 'Ksh ' + data.shipping.toFixed(2);
                 
-                // Update total
-                const subtotal = <?php echo $subtotal; ?>;
-                const tax = subtotal * 0.16;
-                const newTotal = subtotal + data.shipping + tax;
-                document.getElementById('totalAmount').textContent = 'Ksh ' + newTotal.toFixed(2);
-            }
-        } else {
-            resultDiv.innerHTML = `
-                <div class="alert alert-danger p-2 mb-0">
-                    <i class="fas fa-exclamation-circle me-2"></i>
-                    ${data.message || 'Unable to calculate shipping'}
-                </div>
-            `;
-        }
-    } catch (error) {
-        console.error('Calculate shipping error:', error);
-        showToast('Something went wrong. Please try again.', 'error');
-    }
-}
+//                 // Update total
+//                 const subtotal = <?php echo $subtotal; ?>;
+//                 const tax = subtotal * 0.16;
+//                 const newTotal = subtotal + data.shipping + tax;
+//                 document.getElementById('totalAmount').textContent = 'Ksh ' + newTotal.toFixed(2);
+//             }
+//         } else {
+//             resultDiv.innerHTML = `
+//                 <div class="alert alert-danger p-2 mb-0">
+//                     <i class="fas fa-exclamation-circle me-2"></i>
+//                     ${data.message || 'Unable to calculate shipping'}
+//                 </div>
+//             `;
+//         }
+//     } catch (error) {
+//         console.error('Calculate shipping error:', error);
+//         showToast('Something went wrong. Please try again.', 'error');
+//     }
+// }
 
 // Apply discount
 async function applyDiscount() {
@@ -1266,21 +1273,21 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     // Calculate shipping
-    const calculateShippingBtn = document.getElementById('calculateShipping');
-    if (calculateShippingBtn) {
-        calculateShippingBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            calculateShipping();
-        });
+    // const calculateShippingBtn = document.getElementById('calculateShipping');
+    // if (calculateShippingBtn) {
+    //     calculateShippingBtn.addEventListener('click', function(e) {
+    //         e.preventDefault();
+    //         calculateShipping();
+    //     });
         
-        // Allow pressing Enter in postal code field
-        document.getElementById('postalCode')?.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                calculateShipping();
-            }
-        });
-    }
+    //     // Allow pressing Enter in postal code field
+    //     document.getElementById('postalCode')?.addEventListener('keypress', function(e) {
+    //         if (e.key === 'Enter') {
+    //             e.preventDefault();
+    //             calculateShipping();
+    //         }
+    //     });
+    // }
     
     // Apply discount
     const applyDiscountBtn = document.getElementById('applyDiscount');

@@ -69,7 +69,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
 // 4. FETCH ORDER DETAILS
 // ====================================================================
 
-// Fetch order details
+// Fetch order details - UPDATED TO INCLUDE SHIPPING COLUMNS
 $stmt = $db->prepare("
     SELECT 
         o.*,
@@ -77,7 +77,11 @@ $stmt = $db->prepare("
         u.last_name,
         u.email,
         u.phone,
-        u.address
+        u.address,
+        COALESCE(o.shipping_cost, 0) as shipping_cost,
+        COALESCE(o.shipping_message, 'Standard shipping') as shipping_message,
+        COALESCE(o.shipping_county, '') as shipping_county,
+        COALESCE(o.shipping_town_area, '') as shipping_town_area
     FROM orders o
     LEFT JOIN users u ON o.user_id = u.id
     WHERE o.id = ?
@@ -289,18 +293,32 @@ foreach ($orderItems as $item) {
                                     <td class="fw-bold">Ksh ' . number_format($item['total_price'], 2) . '</td>
                                 </tr>';
 }
+// Calculate items subtotal
+$itemsSubtotal = 0;
+foreach ($orderItems as $item) {
+    $itemsSubtotal += $item['total_price'];
+}
+
+$shippingCost = (float)($order['shipping_cost'] ?? 0);
+$taxRate = 0.16;
+$taxAmount = $itemsSubtotal * $taxRate;
+$grandTotal = $itemsSubtotal + $shippingCost + $taxAmount;
 $content .= '
                                 <tr class="table-light">
-                                    <td colspan="4" class="text-end fw-bold">Subtotal</td>
-                                    <td class="fw-bold">Ksh ' . number_format($order['total_amount'], 2) . '</td>
+                                    <td colspan="4" class="text-end fw-bold">Items Subtotal</td>
+                                    <td class="fw-bold">Ksh ' . number_format($itemsSubtotal, 2) . '</td>
                                 </tr>
                                 <tr class="table-light">
-                                    <td colspan="4" class="text-end fw-bold">Shipping</td>
-                                    <td class="fw-bold">Ksh 0.00</td>
+                                    <td colspan="4" class="text-end fw-bold">Shipping (' . htmlspecialchars($order['shipping_message'] ?? 'Standard shipping') . ')</td>
+                                    <td class="fw-bold">Ksh ' . number_format($shippingCost, 2) . '</td>
                                 </tr>
                                 <tr class="table-light">
-                                    <td colspan="4" class="text-end fw-bold">Total</td>
-                                    <td class="fw-bold h5">Ksh ' . number_format($order['total_amount'], 2) . '</td>
+                                    <td colspan="4" class="text-end fw-bold">Tax (16% VAT)</td>
+                                    <td class="fw-bold">Ksh ' . number_format($taxAmount, 2) . '</td>
+                                </tr>
+                                <tr class="table-light">
+                                    <td colspan="4" class="text-end fw-bold h5">Total</td>
+                                    <td class="fw-bold h5">Ksh ' . number_format($grandTotal, 2) . '</td>
                                 </tr>
                             </tbody>
                         </table>

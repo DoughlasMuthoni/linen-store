@@ -8,8 +8,7 @@ ini_set('display_errors', 1);
 require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/Database.php';
 require_once __DIR__ . '/../includes/App.php';
-
-// ADD THIS: Include Notification Helper
+require_once __DIR__ . '/../includes/Shipping.php';
 require_once __DIR__ . '/../includes/NotificationHelper.php';
 
 $app = new App();
@@ -38,6 +37,18 @@ if (empty($_SESSION['cart'])) {
     header('Location: ' . SITE_URL . 'cart');
     exit();
 }
+
+// Include Shipping class
+$shippingHelper = new Shipping($db);
+
+// Get shipping zones for dropdown
+$shippingZones = $shippingHelper->getZonesForDropdown();
+
+// Get user's selected zone (from session or default)
+$selectedZoneId = $_SESSION['selected_zone_id'] ?? ($shippingZones[0]['id'] ?? 0);
+
+// Get user county from session or default
+$userCounty = $_SESSION['user']['county'] ?? 'Nairobi';
 
 // Fetch cart items - handle new variant structure
 $cart = $_SESSION['cart'];
@@ -116,7 +127,25 @@ foreach ($products as $product) {
     }
 }
 
-$shipping = ($subtotal >= 5000) ? 0 : 300;
+// Calculate shipping cost based on county (since your Shipping class uses county-based calculation)
+$shippingInfo = $shippingHelper->calculateShipping($userCounty, $subtotal);
+
+$shipping = $shippingInfo['cost'];
+$shippingMessage = $shippingInfo['message'] ?? 'Standard shipping';
+$shippingZoneId = $shippingInfo['zone_id'] ?? null;
+$deliveryDays = $shippingInfo['delivery_days'] ?? 3;
+
+// Get zone name from selected zone
+$shippingZoneName = 'Standard Shipping';
+if ($shippingZoneId) {
+    foreach ($shippingZones as $zone) {
+        if ($zone['id'] == $shippingZoneId) {
+            $shippingZoneName = $zone['zone_name'];
+            break;
+        }
+    }
+}
+
 $tax = $subtotal * 0.16;
 $total = $subtotal + $shipping + $tax;
 
@@ -162,6 +191,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'Please select or enter a shipping address';
     }
     
+    // Validate shipping zone
+    // if (empty($_POST['shipping_zone_id'])) {
+    //     $errors[] = 'Please select a shipping zone';
+    // }
+    // Validate town/area
+    if (empty($_POST['shipping_town_area'])) {
+        $errors[] = 'Please select a town/area';
+    }
+    
     // Validate payment method
     if (empty($_POST['payment_method'])) {
         $errors[] = 'Please select a payment method';
@@ -172,90 +210,110 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $db->beginTransaction();
             
-            // ========== Determine shipping address ==========
-            if (!empty($_POST['shipping_address_id'])) {
-                // Use saved address
-                $addressId = intval($_POST['shipping_address_id']);
-                $addressStmt = $db->prepare("SELECT * FROM user_addresses WHERE id = ? AND user_id = ?");
-                $addressStmt->execute([$addressId, $user['id']]);
-                $savedAddress = $addressStmt->fetch(PDO::FETCH_ASSOC);
-                
-                if ($savedAddress) {
-                    $shippingAddress = implode(', ', array_filter([
-                        $savedAddress['full_name'],
-                        $savedAddress['address_line1'],
-                        $savedAddress['address_line2'],
-                        $savedAddress['city'],
-                        $savedAddress['state'],
-                        $savedAddress['postal_code'],
-                        $savedAddress['country']
-                    ]));
-                } else {
-                    throw new Exception("Selected address not found");
-                }
-            } else {
-                // Use new address
-                $addr = $_POST['new_shipping_address'];
-                $shippingAddress = implode(', ', array_filter([
-                    $addr['full_name'],
-                    $addr['address_line1'],
-                    $addr['address_line2'],
-                    $addr['city'],
-                    $addr['state'],
-                    $addr['postal_code'],
-                    $addr['country']
-                ]));
-                
-                // Save new address to user_addresses table if checkbox is checked
-                if (isset($_POST['save_new_address']) && $_POST['save_new_address'] == '1') {
-                    $saveAddressStmt = $db->prepare("
-                        INSERT INTO user_addresses 
-                        (user_id, address_title, full_name, address_line1, address_line2, 
-                         city, state, postal_code, country, phone, email)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ");
-                    
-                    $addressTitle = 'Address from ' . date('M j, Y');
-                    $saveAddressStmt->execute([
-                        $user['id'],
-                        $addressTitle,
-                        $addr['full_name'],
-                        $addr['address_line1'],
-                        $addr['address_line2'] ?? '',
-                        $addr['city'],
-                        $addr['state'],
-                        $addr['postal_code'],
-                        $addr['country'],
-                        $addr['phone'] ?? ($user['phone'] ?? ''),
-                        $addr['email'] ?? ($user['email'] ?? '')
-                    ]);
-                }
-            }
+           // ========== Determine shipping address ==========
+    if (!empty($_POST['shipping_address_id'])) {
+        // Use saved address
+        $addressId = intval($_POST['shipping_address_id']);
+        $addressStmt = $db->prepare("SELECT * FROM user_addresses WHERE id = ? AND user_id = ?");
+        $addressStmt->execute([$addressId, $user['id']]);
+        $savedAddress = $addressStmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($savedAddress) {
+            $shippingAddress = implode(', ', array_filter([
+                $savedAddress['full_name'],
+                $savedAddress['address_line1'],
+                $savedAddress['address_line2'],
+                $savedAddress['city'],
+                $savedAddress['state'],
+                $savedAddress['postal_code'],
+                $savedAddress['country']
+            ]));
             
-            // Insert order
+            // Get county from saved address or new input
+            $county = $savedAddress['county'] ?? ($_POST['new_shipping_address']['county'] ?? 'Nairobi');
+        }
+    } else {
+        // Use new address
+        $addr = $_POST['new_shipping_address'];
+        $shippingAddress = implode(', ', array_filter([
+            $addr['full_name'],
+            $addr['address_line1'],
+            $addr['address_line2'],
+            $addr['city'],
+            $addr['state'],
+            $addr['postal_code'],
+            $addr['country']
+        ]));
+        
+        $county = $addr['county'] ?? 'Nairobi';
+        
+        // Save new address to user_addresses table if checkbox is checked
+        if (isset($_POST['save_new_address']) && $_POST['save_new_address'] == '1') {
+            $saveAddressStmt = $db->prepare("
+                INSERT INTO user_addresses 
+                (user_id, address_title, full_name, address_line1, address_line2, 
+                city, state, postal_code, country, county, phone, email)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ");
+            
+            $addressTitle = 'Address from ' . date('M j, Y');
+            $saveAddressStmt->execute([
+                $user['id'],
+                $addressTitle,
+                $addr['full_name'],
+                $addr['address_line1'],
+                $addr['address_line2'] ?? '',
+                $addr['city'],
+                $addr['state'],
+                $addr['postal_code'],
+                $addr['country'],
+                $county,
+                $addr['phone'] ?? ($user['phone'] ?? ''),
+                $addr['email'] ?? ($user['email'] ?? '')
+            ]);
+        }
+    }
+            
+            // Get shipping info from POST
+            $shippingZoneId = $_POST['shipping_zone_id'] ?? null;
+            $shippingCost = $_POST['shipping_cost'] ?? 0;
+            $shippingMessage = $_POST['shipping_message'] ?? 'Standard shipping';
+            $shippingTownArea = $_POST['shipping_town_area'] ?? '';
+
+            // Insert order with shipping zone info
             $orderStmt = $db->prepare("
                 INSERT INTO orders (
                     order_number, 
                     user_id, 
                     total_amount,
                     shipping_address, 
+                    shipping_county,
+                    shipping_town_area,
+                    shipping_zone_id,
+                    shipping_cost,
+                    shipping_message,
                     billing_address,
                     status, 
                     payment_method, 
                     payment_status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
-            
+
             $orderNumber = 'ORD-' . date('Ymd') . '-' . strtoupper(substr(uniqid(), -8));
             $status = 'pending';
             $payment_status = 'pending';
-            
+
             $orderStmt->execute([
                 $orderNumber,
                 $user['id'] ?? 0,
                 $total,
                 $shippingAddress,
-                $shippingAddress,
+                $county,                // shipping_county
+                $shippingTownArea,      // shipping_town_area
+                $shippingZoneId,        // shipping_zone_id
+                $shippingCost,          // shipping_cost
+                $shippingMessage,       // shipping_message
+                $shippingAddress,       // billing_address
                 $status,
                 $_POST['payment_method'],
                 $payment_status
@@ -720,61 +778,96 @@ require_once __DIR__ . '/../includes/header.php';
                                 </select>
                                 <div class="invalid-feedback">Country is required</div>
                             </div>
+                            
+                            <!-- County Selection -->
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">County <span class="text-danger">*</span></label>
+                                <select class="form-control" name="new_shipping_address[county]" id="countySelect" required>
+                                    <option value="">Select County</option>
+                                    <?php
+                                    $counties = $shippingHelper->getAllCounties();
+                                    foreach ($counties as $county):
+                                    ?>
+                                        <option value="<?php echo htmlspecialchars($county); ?>"
+                                            <?php echo ($userCounty == $county) ? 'selected' : ''; ?>>
+                                            <?php echo htmlspecialchars($county); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                    <option value="Other">Other (Specify)</option>
+                                </select>
+                                <div class="invalid-feedback">Please select a county</div>
+                            </div>
+                            
+                            <!-- Other County Input -->
+                            <div class="col-md-6" id="otherCountyDiv" style="display: none;">
+                                <label class="form-label fw-bold">Specify County <span class="text-danger">*</span></label>
+                                <input type="text" 
+                                       class="form-control" 
+                                       id="otherCountyInput"
+                                       placeholder="Enter your county">
+                            </div>
+                            
+                            <!-- Towns/Areas Selection (Replaces Shipping Zone) -->
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Towns/Areas <span class="text-danger">*</span></label>
+                                <select class="form-control" name="shipping_town_area" id="townAreaSelect" required>
+                                    <option value="">Select Town/Area</option>
+                                    <?php
+                                    // Get all towns/areas from shipping zones
+                                    $townsAreas = $shippingHelper->getAllTownsAreas();
+                                    $userTownArea = $_SESSION['user']['town_area'] ?? '';
+                                    
+                                    foreach ($townsAreas as $townArea):
+                                    ?>
+                                        <option value="<?php echo htmlspecialchars($townArea); ?>"
+                                            <?php echo ($userTownArea == $townArea) ? 'selected' : ''; ?>>
+                                            <?php echo htmlspecialchars($townArea); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                    <option value="Other">Other (Specify)</option>
+                                </select>
+                                <div class="invalid-feedback">Please select a town/area</div>
+                            </div>
+
+                            <!-- Other Town/Area Input -->
+                            <div class="col-md-6" id="otherTownAreaDiv" style="display: none;">
+                                <label class="form-label fw-bold">Specify Town/Area <span class="text-danger">*</span></label>
+                                <input type="text" 
+                                    class="form-control" 
+                                    id="otherTownAreaInput"
+                                    placeholder="Enter your specific town/area">
+                            </div>
+                            <!-- Hidden shipping zone field (will be auto-populated based on town/area) -->
+                <input type="hidden" name="shipping_zone_id" id="hiddenShippingZoneId" value="<?php echo $shippingZoneId; ?>">
                         </div>
                         
-                        <!-- Shipping Method -->
+                        <!-- Shipping Information -->
                         <div class="mt-4">
-                            <h6 class="fw-bold mb-3 text-dark-blue">Shipping Method</h6>
-                            <div class="row g-3">
-                                <div class="col-md-6">
-                                    <div class="card border h-100 shipping-method-card">
-                                        <div class="card-body">
-                                            <div class="form-check">
-                                                <input class="form-check-input" 
-                                                       type="radio" 
-                                                       name="shipping_method" 
-                                                       value="standard"
-                                                       id="shipping-standard"
-                                                       checked>
-                                                <label class="form-check-label fw-bold" for="shipping-standard">
-                                                    Standard Shipping
-                                                </label>
-                                                <div class="mt-2">
-                                                    <p class="mb-1 small">Delivery in 3-5 business days</p>
-                                                    <p class="mb-0 fw-bold text-blue">
-                                                        <?php if ($subtotal >= 5000): ?>
-                                                            <span class="text-success">FREE</span>
-                                                        <?php else: ?>
-                                                            Ksh 300.00
-                                                        <?php endif; ?>
-                                                    </p>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="col-md-6">
-                                    <div class="card border h-100 shipping-method-card">
-                                        <div class="card-body">
-                                            <div class="form-check">
-                                                <input class="form-check-input" 
-                                                       type="radio" 
-                                                       name="shipping_method" 
-                                                       value="express"
-                                                       id="shipping-express">
-                                                <label class="form-check-label fw-bold" for="shipping-express">
-                                                    Express Shipping
-                                                </label>
-                                                <div class="mt-2">
-                                                    <p class="mb-1 small">Delivery in 1-2 business days</p>
-                                                    <p class="mb-0 fw-bold text-blue">Ksh 700.00</p>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
+                            <h6 class="fw-bold mb-3 text-dark-blue">Shipping Information</h6>
+                            <div class="alert alert-info" id="shippingInfoAlert">
+                                <p class="mb-2"><strong>Shipping to:</strong> <span id="currentCounty"><?php echo htmlspecialchars($userCounty); ?></span></p>
+                                <p class="mb-0">
+                                    <strong>Cost:</strong> 
+                                    <span id="currentShippingCost">
+                                        <?php if ($shipping > 0): ?>
+                                            Ksh <?php echo number_format($shipping, 2); ?>
+                                        <?php else: ?>
+                                            <span class="text-success">FREE</span>
+                                        <?php endif; ?>
+                                    </span>
+                                    <br>
+                                    <small class="text-muted" id="currentShippingMessage">
+                                        <?php echo htmlspecialchars($shippingMessage); ?>
+                                        <?php if ($deliveryDays): ?> (<?php echo $deliveryDays; ?> business days)<?php endif; ?>
+                                    </small>
+                                </p>
                             </div>
                         </div>
+                        
+                        <!-- Hidden shipping fields -->
+                        <input type="hidden" name="shipping_zone_id" id="hiddenShippingZoneId" value="<?php echo $shippingZoneId; ?>">
+                        <input type="hidden" name="shipping_cost" id="hiddenShippingCost" value="<?php echo $shipping; ?>">
+                        <input type="hidden" name="shipping_message" id="hiddenShippingMessage" value="<?php echo htmlspecialchars($shippingMessage); ?>">
                     </div>
                 </div>
                 
@@ -937,13 +1030,15 @@ require_once __DIR__ . '/../includes/header.php';
                                 <span class="text-muted">Subtotal</span>
                                 <span class="fw-bold text-dark-blue">Ksh <?php echo number_format($subtotal, 2); ?></span>
                             </div>
-                            <div class="d-flex justify-content-between mb-2">
+                           <div class="d-flex justify-content-between mb-2">
                                 <span class="text-muted">Shipping</span>
                                 <span class="fw-bold text-dark-blue" id="shippingSummary">
                                     <?php if ($shipping > 0): ?>
                                         Ksh <?php echo number_format($shipping, 2); ?>
+                                        <small class="d-block text-muted"><?php echo htmlspecialchars($shippingMessage); ?></small>
                                     <?php else: ?>
                                         <span class="text-success">FREE</span>
+                                        <small class="d-block text-muted"><?php echo htmlspecialchars($shippingMessage); ?></small>
                                     <?php endif; ?>
                                 </span>
                             </div>
@@ -1005,7 +1100,128 @@ require_once __DIR__ . '/../includes/header.php';
 </div>
 
 <script>
+// Shipping Zone Selection Handler
 document.addEventListener('DOMContentLoaded', function() {
+    const countySelect = document.getElementById('countySelect');
+    const otherCountyDiv = document.getElementById('otherCountyDiv');
+    const otherCountyInput = document.getElementById('otherCountyInput');
+    const townAreaSelect = document.getElementById('townAreaSelect'); // NEW
+    const otherTownAreaDiv = document.getElementById('otherTownAreaDiv'); // NEW
+    const otherTownAreaInput = document.getElementById('otherTownAreaInput'); // NEW
+    const zoneSelect = document.getElementById('shippingZoneSelect');
+    const zoneCountiesInfo = document.getElementById('zoneCountiesInfo');
+    const subtotal = <?php echo $subtotal; ?>;
+    
+    // Show zone counties info for selected option
+    function showZoneInfo(selectedOption) {
+        if (selectedOption && selectedOption.dataset.counties) {
+            const counties = selectedOption.dataset.counties;
+            if (counties.trim()) {
+                // Truncate if too long
+                const displayCounties = counties.length > 100 ? 
+                    counties.substring(0, 100) + '...' : counties;
+                zoneCountiesInfo.textContent = 'Covers: ' + displayCounties;
+                zoneCountiesInfo.style.display = 'block';
+            } else {
+                zoneCountiesInfo.style.display = 'none';
+            }
+        } else {
+            zoneCountiesInfo.style.display = 'none';
+        }
+    }
+    
+    // Handle county selection change
+    if (countySelect) {
+        countySelect.addEventListener('change', function() {
+            const county = this.value;
+            
+            // Show/hide "Other" county input
+            if (county === 'Other') {
+                otherCountyDiv.style.display = 'block';
+                if (otherCountyInput) {
+                    otherCountyInput.required = true;
+                }
+            } else {
+                otherCountyDiv.style.display = 'none';
+                if (otherCountyInput) {
+                    otherCountyInput.required = false;
+                    otherCountyInput.value = '';
+                }
+                
+                // Update shipping for selected county
+                if (county) {
+                    updateShippingByCounty(county);
+                }
+            }
+        });
+    }
+    
+    // Handle "Other" county input
+    if (otherCountyInput) {
+        otherCountyInput.addEventListener('input', function() {
+            const otherCounty = this.value.trim();
+            if (otherCounty.length > 2) {
+                updateShippingByCounty(otherCounty);
+            }
+        });
+    }
+    
+    // NEW: Handle town/area selection change
+    if (townAreaSelect) {
+        townAreaSelect.addEventListener('change', function() {
+            const townArea = this.value;
+            
+            // Show/hide "Other" town/area input
+            if (townArea === 'Other') {
+                otherTownAreaDiv.style.display = 'block';
+                if (otherTownAreaInput) {
+                    otherTownAreaInput.required = true;
+                }
+            } else {
+                otherTownAreaDiv.style.display = 'none';
+                if (otherTownAreaInput) {
+                    otherTownAreaInput.required = false;
+                    otherTownAreaInput.value = '';
+                }
+                
+                // Update shipping for selected town/area
+                if (townArea) {
+                    updateShippingByTownArea(townArea);
+                }
+            }
+        });
+    }
+    
+    // NEW: Handle "Other" town/area input
+    if (otherTownAreaInput) {
+        otherTownAreaInput.addEventListener('input', function() {
+            const otherTownArea = this.value.trim();
+            if (otherTownArea.length > 2) {
+                updateShippingByTownArea(otherTownArea);
+            }
+        });
+    }
+    
+    // Handle zone selection change
+    if (zoneSelect) {
+        // Show info for initially selected option
+        const initialOption = zoneSelect.options[zoneSelect.selectedIndex];
+        showZoneInfo(initialOption);
+        
+        zoneSelect.addEventListener('change', function() {
+            const selectedOption = this.options[this.selectedIndex];
+            const zoneId = this.value;
+            
+            // Show zone info
+            showZoneInfo(selectedOption);
+            
+            // Update shipping for selected zone
+            if (zoneId) {
+                updateShippingByZone(zoneId, subtotal);
+            }
+        });
+    }
+    
     // Initialize elements
     const placeOrderBtn = document.getElementById('placeOrderBtn');
     const checkoutForm = document.getElementById('checkoutForm');
@@ -1015,14 +1231,6 @@ document.addEventListener('DOMContentLoaded', function() {
         radio.addEventListener('change', function() {
             updatePaymentDetails();
             updatePaymentCardStyles();
-        });
-    });
-    
-    // Shipping method selection
-    document.querySelectorAll('input[name="shipping_method"]').forEach(radio => {
-        radio.addEventListener('change', function() {
-            updateShippingCost();
-            updateShippingCardStyles();
         });
     });
     
@@ -1059,10 +1267,14 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
+    // Initialize with selected town/area if any
+    if (townAreaSelect && townAreaSelect.value && townAreaSelect.value !== 'Other') {
+        updateShippingByTownArea(townAreaSelect.value);
+    }
+    
     // Initialize
     updatePaymentDetails();
     updatePaymentCardStyles();
-    updateShippingCardStyles();
     
     // Set M-Pesa account number dynamically
     const mpesaAccount = document.getElementById('mpesaAccount');
@@ -1072,6 +1284,172 @@ document.addEventListener('DOMContentLoaded', function() {
         mpesaAccount.textContent = orderId;
     }
 });
+
+// Update shipping based on county
+async function updateShippingByCounty(county) {
+    if (!county || county === '' || county === 'Other') return;
+    
+    const subtotal = <?php echo $subtotal; ?>;
+    
+    try {
+        const response = await fetch('<?php echo SITE_URL; ?>ajax/calculate-shipping.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                county: county,
+                subtotal: subtotal
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            updateShippingDisplay(county, data, 'county');
+        }
+    } catch (error) {
+        console.error('Update shipping error:', error);
+    }
+}
+
+// NEW: Update shipping based on town/area
+async function updateShippingByTownArea(townArea) {
+    if (!townArea || townArea === '' || townArea === 'Other') return;
+    
+    const subtotal = <?php echo $subtotal; ?>;
+    
+    try {
+        const response = await fetch('<?php echo SITE_URL; ?>ajax/calculate-shipping-by-town.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                town_area: townArea,
+                subtotal: subtotal
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            updateShippingDisplay(townArea, data, 'town');
+        }
+    } catch (error) {
+        console.error('Update shipping error:', error);
+        // Fallback to county-based calculation
+        const county = document.getElementById('countySelect').value;
+        if (county && county !== 'Other') {
+            updateShippingByCounty(county);
+        }
+    }
+}
+
+// Update shipping based on zone ID
+async function updateShippingByZone(zoneId, subtotal) {
+    if (!zoneId || zoneId === '') return;
+    
+    try {
+        // First get the zone details to find which counties it covers
+        const response = await fetch('<?php echo SITE_URL; ?>ajax/get-zone-details.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                zone_id: zoneId
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // Update display with zone data
+            updateShippingDisplay(data.zone_name || 'Selected Zone', {
+                cost: data.cost,
+                message: data.zone_name + ' delivery (' + data.delivery_days + ' days)',
+                zone_id: zoneId,
+                delivery_days: data.delivery_days,
+                counties: data.counties
+            }, 'zone');
+        }
+    } catch (error) {
+        console.error('Update shipping error:', error);
+    }
+}
+
+// Update shipping display with data
+function updateShippingDisplay(location, data, type = 'county') {
+    const shipping = parseFloat(data.cost) || 0;
+    const subtotal = <?php echo $subtotal; ?>;
+    const tax = subtotal * 0.16;
+    const total = subtotal + shipping + tax;
+    
+    // Update shipping info alert
+    const shippingInfoAlert = document.getElementById('shippingInfoAlert');
+    if (shippingInfoAlert) {
+        let locationInfo = '';
+        if (type === 'county') {
+            locationInfo = `<strong>Shipping to:</strong> <span id="currentLocation">${location}</span>`;
+        } else if (type === 'town') {
+            locationInfo = `<strong>Shipping to:</strong> <span id="currentLocation">${location}</span>`;
+            if (data.zone_name) {
+                locationInfo += `<br><small class="text-muted">Zone: ${data.zone_name}</small>`;
+            }
+        } else if (type === 'zone') {
+            locationInfo = `<strong>Shipping Zone:</strong> <span id="currentLocation">${location}</span>`;
+            if (data.counties) {
+                locationInfo += `<br><small class="text-muted">Covers: ${data.counties}</small>`;
+            }
+        }
+        
+        shippingInfoAlert.innerHTML = `
+            <p class="mb-2">
+                ${locationInfo}
+            </p>
+            <p class="mb-0">
+                <strong>Cost:</strong> 
+                <span id="currentShippingCost">
+                    ${shipping === 0 ? '<span class="text-success">FREE</span>' : 'Ksh ' + shipping.toFixed(2)}
+                </span>
+                <br>
+                <small class="text-muted" id="currentShippingMessage">
+                    ${data.message || 'Standard shipping'}
+                    ${data.delivery_days ? ' (' + data.delivery_days + ' business days)' : ''}
+                </small>
+            </p>
+        `;
+    }
+    
+    // Update order summary
+    const shippingSummary = document.getElementById('shippingSummary');
+    const totalSummary = document.getElementById('totalSummary');
+    const mpesaAmount = document.getElementById('mpesaAmount');
+    
+    if (shippingSummary) {
+        shippingSummary.innerHTML = shipping === 0 
+            ? '<span class="text-success">FREE</span><small class="d-block text-muted">' + (data.message || 'Standard shipping') + '</small>'
+            : 'Ksh ' + shipping.toFixed(2) + '<small class="d-block text-muted">' + (data.message || 'Standard shipping') + '</small>';
+    }
+    
+    if (totalSummary) {
+        totalSummary.textContent = 'Ksh ' + total.toFixed(2);
+        totalSummary.classList.add('price-update');
+        setTimeout(() => {
+            totalSummary.classList.remove('price-update');
+        }, 500);
+    }
+    
+    if (mpesaAmount) {
+        mpesaAmount.textContent = total.toFixed(2);
+    }
+    
+    // Update hidden fields
+    document.getElementById('hiddenShippingZoneId').value = data.zone_id || '';
+    document.getElementById('hiddenShippingCost').value = shipping;
+    document.getElementById('hiddenShippingMessage').value = data.message || 'Standard shipping';
+}
 
 // Update payment details based on selection
 function updatePaymentDetails() {
@@ -1112,64 +1490,6 @@ function updatePaymentCardStyles() {
     });
 }
 
-// Update shipping card styles
-function updateShippingCardStyles() {
-    const selectedMethod = document.querySelector('input[name="shipping_method"]:checked')?.value;
-    
-    document.querySelectorAll('.shipping-method-card').forEach(card => {
-        const radio = card.querySelector('input[type="radio"]');
-        if (radio && radio.value === selectedMethod) {
-            card.classList.add('border-blue');
-            card.style.borderWidth = '2px';
-            card.style.backgroundColor = '#f8f9fa';
-        } else {
-            card.classList.remove('border-blue');
-            card.style.borderWidth = '1px';
-            card.style.backgroundColor = '';
-        }
-    });
-}
-
-// Update shipping cost
-function updateShippingCost() {
-    const shippingMethod = document.querySelector('input[name="shipping_method"]:checked')?.value;
-    const subtotal = <?php echo $subtotal; ?>;
-    
-    let shippingCost = 0;
-    
-    if (shippingMethod === 'standard') {
-        shippingCost = (subtotal >= 5000) ? 0 : 300;
-    } else if (shippingMethod === 'express') {
-        shippingCost = 700;
-    }
-    
-    // Update display
-    const shippingSummary = document.getElementById('shippingSummary');
-    const totalSummary = document.getElementById('totalSummary');
-    const mpesaAmount = document.getElementById('mpesaAmount');
-    
-    const tax = subtotal * 0.16;
-    const total = subtotal + shippingCost + tax;
-    
-    if (shippingSummary) {
-        shippingSummary.innerHTML = shippingCost === 0 
-            ? '<span class="text-success">FREE</span>'
-            : 'Ksh ' + shippingCost.toFixed(2);
-    }
-    
-    if (totalSummary) {
-        totalSummary.textContent = 'Ksh ' + total.toFixed(2);
-        totalSummary.classList.add('price-update');
-        setTimeout(() => {
-            totalSummary.classList.remove('price-update');
-        }, 500);
-    }
-    
-    if (mpesaAmount) {
-        mpesaAmount.textContent = total.toFixed(2);
-    }
-}
-
 // Validate individual field
 function validateField(field) {
     const errorElement = field.parentNode.querySelector('.invalid-feedback') || 
@@ -1203,19 +1523,43 @@ function validateForm() {
         { name: 'new_shipping_address[city]', label: 'City' },
         { name: 'new_shipping_address[state]', label: 'State/Province' },
         { name: 'new_shipping_address[postal_code]', label: 'Postal Code' },
-        { name: 'new_shipping_address[country]', label: 'Country' }
+        { name: 'new_shipping_address[country]', label: 'Country' },
+        { name: 'new_shipping_address[county]', label: 'County' },
+        { name: 'shipping_town_area', label: 'Town/Area' } // NEW
     ];
     
     requiredFields.forEach(field => {
         const input = document.querySelector(`[name="${field.name}"]`);
         if (!input || !input.value.trim()) {
             errors.push(`${field.label} is required`);
-            input.classList.add('is-invalid');
+            if (input) input.classList.add('is-invalid');
             isValid = false;
         } else {
-            input.classList.remove('is-invalid');
+            if (input) input.classList.remove('is-invalid');
         }
     });
+    
+    // Check "Other" county if selected
+    const countySelect = document.getElementById('countySelect');
+    if (countySelect && countySelect.value === 'Other') {
+        const otherCountyInput = document.getElementById('otherCountyInput');
+        if (!otherCountyInput || !otherCountyInput.value.trim()) {
+            errors.push('Please specify your county');
+            if (otherCountyInput) otherCountyInput.classList.add('is-invalid');
+            isValid = false;
+        }
+    }
+    
+    // NEW: Check "Other" town/area if selected
+    const townAreaSelect = document.getElementById('townAreaSelect');
+    if (townAreaSelect && townAreaSelect.value === 'Other') {
+        const otherTownAreaInput = document.getElementById('otherTownAreaInput');
+        if (!otherTownAreaInput || !otherTownAreaInput.value.trim()) {
+            errors.push('Please specify your town/area');
+            if (otherTownAreaInput) otherTownAreaInput.classList.add('is-invalid');
+            isValid = false;
+        }
+    }
     
     // Check payment method
     const paymentMethod = document.querySelector('input[name="payment_method"]:checked');
@@ -1275,13 +1619,43 @@ function showErrorModal(errors) {
     modal.show();
 }
 
-// Add smooth scrolling for order items
-function scrollToElement(elementId) {
-    const element = document.getElementById(elementId);
-    if (element) {
-        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+// Validate "Other" county on form submission
+document.getElementById('checkoutForm')?.addEventListener('submit', function(e) {
+    const countySelect = document.getElementById('countySelect');
+    const otherCountyDiv = document.getElementById('otherCountyDiv');
+    const otherCountyInput = document.getElementById('otherCountyInput');
+    const townAreaSelect = document.getElementById('townAreaSelect');
+    const otherTownAreaDiv = document.getElementById('otherTownAreaDiv');
+    const otherTownAreaInput = document.getElementById('otherTownAreaInput');
+    
+    // Validate "Other" county
+    if (countySelect && countySelect.value === 'Other' && otherCountyDiv.style.display === 'block') {
+        if (!otherCountyInput || !otherCountyInput.value.trim()) {
+            e.preventDefault();
+            alert('Please specify your county');
+            if (otherCountyInput) otherCountyInput.focus();
+            return false;
+        }
+        
+        // Set the actual county value
+        countySelect.value = otherCountyInput.value.trim();
     }
-}
+    
+    // NEW: Validate "Other" town/area
+    if (townAreaSelect && townAreaSelect.value === 'Other' && otherTownAreaDiv.style.display === 'block') {
+        if (!otherTownAreaInput || !otherTownAreaInput.value.trim()) {
+            e.preventDefault();
+            alert('Please specify your town/area');
+            if (otherTownAreaInput) otherTownAreaInput.focus();
+            return false;
+        }
+        
+        // Set the actual town/area value
+        townAreaSelect.value = otherTownAreaInput.value.trim();
+    }
+    
+    return true;
+});
 </script>
 
 <?php
