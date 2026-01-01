@@ -39,9 +39,20 @@ if (empty($_SESSION['cart'])) {
     exit();
 }
 
-// Fetch cart items
+// Fetch cart items - handle new variant structure
 $cart = $_SESSION['cart'];
-$productIds = array_keys($cart);
+
+// Extract product IDs from cart items (handles both old and new structure)
+$productIds = [];
+foreach ($cart as $cartKey => $item) {
+    if (isset($item['product_id'])) {
+        $productIds[] = $item['product_id'];
+    } elseif (is_numeric($cartKey)) {
+        // Old structure: cart key is product ID
+        $productIds[] = $cartKey;
+    }
+}
+$productIds = array_unique($productIds);
 $placeholders = str_repeat('?,', count($productIds) - 1) . '?';
 
 // FIXED: Include min_stock_level in the query
@@ -67,23 +78,42 @@ $subtotal = 0;
 $cartItems = [];
 
 foreach ($products as $product) {
-    $itemId = $product['id'];
-    $cartItem = $cart[$itemId];
-    $quantity = $cartItem['quantity'] ?? 1;
-    $price = $product['price'];
-    $itemTotal = $price * $quantity;
+    $productId = $product['id'];
     
-    $cartItems[] = [
-        'product' => $product,
-        'quantity' => $quantity,
-        'price' => $price,
-        'total' => $itemTotal,
-        'size' => $cartItem['size'] ?? null,
-        'color' => $cartItem['color'] ?? null,
-        'material' => $cartItem['material'] ?? null
-    ];
-    
-    $subtotal += $itemTotal;
+    // Find all cart items for this product (including variants)
+    foreach ($cart as $cartKey => $cartItemData) {
+        $itemProductId = null;
+        
+        // Determine product ID based on cart structure
+        if (isset($cartItemData['product_id'])) {
+            $itemProductId = $cartItemData['product_id'];
+        } elseif (is_numeric($cartKey)) {
+            $itemProductId = $cartKey;
+        }
+        
+        // Skip if not this product
+        if ($itemProductId != $productId) {
+            continue;
+        }
+        
+        $quantity = $cartItemData['quantity'] ?? 1;
+        $price = $cartItemData['price'] ?? $product['price'];
+        $itemTotal = $price * $quantity;
+        
+        $cartItems[] = [
+            'cart_key' => $cartKey,
+            'product' => $product,
+            'quantity' => $quantity,
+            'price' => $price,
+            'total' => $itemTotal,
+            'size' => $cartItemData['size'] ?? null,
+            'color' => $cartItemData['color'] ?? null,
+            'material' => $cartItemData['material'] ?? null,
+            'variant_id' => $cartItemData['variant_id'] ?? null
+        ];
+        
+        $subtotal += $itemTotal;
+    }
 }
 
 $shipping = ($subtotal >= 5000) ? 0 : 300;
@@ -283,8 +313,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ");
                 
-                $itemsInserted = 0;
-                foreach ($cartItems as $item) {
+            $itemsInserted = 0;
+            foreach ($cartItems as $item) {
                     $product = $item['product'];
                     $orderItemStmt->execute([
                         $orderId,
@@ -308,27 +338,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         WHERE id = ?
                     ");
                     $updateStmt->execute([$item['quantity'], $item['quantity'], $product['id']]);
-                    
-                 // ========== STOCK NOTIFICATION ==========
-                try {
-                    // Calculate new stock
-                    $newStock = (int)$product['stock_quantity'] - (int)$item['quantity'];
-                    $minStock = (int)$product['min_stock_level'];
-                    
-                    // Create stock notification
-                    NotificationHelper::createStockNotification(
-                        $db,
-                        $product['id'],
-                        $product['name'],
-                        $newStock,
-                        $minStock
-                    );
-                    
-                } catch (Exception $e) {
-                    error_log('Stock notification error: ' . $e->getMessage());
-                }
-                // ========== END STOCK NOTIFICATION ==========
-                }
+                                // ========== STOCK NOTIFICATION ==========
+                                try {
+                                    // Calculate new stock
+                                    $newStock = (int)$product['stock_quantity'] - (int)$item['quantity'];
+                                    $minStock = (int)$product['min_stock_level'];
+                                    
+                                    // Create stock notification
+                                    NotificationHelper::createStockNotification(
+                                        $db,
+                                        $product['id'],
+                                        $product['name'],
+                                        $newStock,
+                                        $minStock
+                                    );
+                                    
+                                } catch (Exception $e) {
+                                    error_log('Stock notification error: ' . $e->getMessage());
+                                }
+                                // ========== END STOCK NOTIFICATION ==========
+                                }
                 
                 $db->commit();
                 
@@ -357,33 +386,241 @@ $pageTitle = "Checkout";
 require_once __DIR__ . '/../includes/header.php';
 ?>
 
+<style>
+    :root {
+        --primary-blue: #0d6efd;
+        --secondary-blue: #0dcaf0;
+        --dark-blue: #052c65;
+        --light-blue: #cfe2ff;
+        --success-green: #198754;
+        --warning-orange: #ffc107;
+        --danger-red: #dc3545;
+    }
+    
+    /* Blue theme buttons */
+    .btn-primary-blue {
+        background-color: var(--primary-blue);
+        border-color: var(--primary-blue);
+        color: white;
+    }
+    
+    .btn-primary-blue:hover {
+        background-color: var(--dark-blue);
+        border-color: var(--dark-blue);
+        color: white;
+    }
+    
+    .btn-outline-blue {
+        color: var(--primary-blue);
+        border-color: var(--primary-blue);
+    }
+    
+    .btn-outline-blue:hover {
+        background-color: var(--primary-blue);
+        color: white;
+    }
+    
+    /* Text colors */
+    .text-blue {
+        color: var(--primary-blue) !important;
+    }
+    
+    .text-dark-blue {
+        color: var(--dark-blue) !important;
+    }
+    
+    /* Background colors */
+    .bg-blue-light {
+        background-color: var(--light-blue);
+    }
+    
+    .bg-blue {
+        background-color: var(--primary-blue) !important;
+    }
+    
+    /* Border colors */
+    .border-blue {
+        border-color: var(--primary-blue) !important;
+    }
+    
+    /* Checkout progress bar */
+    .progress {
+        height: 8px;
+        background-color: #e9ecef;
+        border-radius: 4px;
+        overflow: hidden;
+    }
+    
+    .progress-bar {
+        background-color: var(--primary-blue);
+    }
+    
+    /* Form controls */
+    .form-control:focus {
+        border-color: var(--primary-blue);
+        box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+    }
+    
+    .form-check-input:checked {
+        background-color: var(--primary-blue);
+        border-color: var(--primary-blue);
+    }
+    
+    /* Card styling */
+    .card {
+        border: 1px solid #dee2e6;
+        transition: all 0.3s ease;
+    }
+    
+    .card:hover {
+        box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+    }
+    
+    .card-header {
+        background-color: white;
+        border-bottom: 2px solid var(--primary-blue);
+    }
+    
+    /* Order summary sticky */
+    .sticky-top {
+        position: -webkit-sticky;
+        position: sticky;
+        z-index: 1020;
+    }
+    
+    /* Payment method cards */
+    .payment-method-card {
+        cursor: pointer;
+        border: 2px solid transparent;
+        transition: all 0.3s ease;
+    }
+    
+    .payment-method-card:hover {
+        border-color: var(--primary-blue);
+        transform: translateY(-2px);
+    }
+    
+    .payment-method-card .form-check-input:checked + .card {
+        border-color: var(--primary-blue);
+        background-color: var(--light-blue);
+    }
+    
+    .shipping-method-card {
+        cursor: pointer;
+        border: 2px solid transparent;
+        transition: all 0.3s ease;
+    }
+    
+    .shipping-method-card:hover {
+        border-color: var(--primary-blue);
+        transform: translateY(-2px);
+    }
+    
+    /* Animation for price updates */
+    .price-update {
+        animation: pricePulse 0.5s ease-in-out;
+    }
+    
+    @keyframes pricePulse {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.1); }
+        100% { transform: scale(1); }
+    }
+    
+    /* Form validation */
+    .is-invalid {
+        border-color: var(--danger-red) !important;
+    }
+    
+    .invalid-feedback {
+        display: none;
+        color: var(--danger-red);
+        font-size: 0.875em;
+        margin-top: 0.25rem;
+    }
+    
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+        .btn-lg {
+            padding: 0.75rem 1.5rem;
+            font-size: 1rem;
+        }
+        
+        .display-5 {
+            font-size: 2rem;
+        }
+        
+        .sticky-top {
+            position: static;
+        }
+    }
+    
+    /* Order items scroll */
+    .order-items-list {
+        max-height: 300px;
+        overflow-y: auto;
+        padding-right: 10px;
+    }
+    
+    .order-items-list::-webkit-scrollbar {
+        width: 5px;
+    }
+    
+    .order-items-list::-webkit-scrollbar-track {
+        background: #f1f1f1;
+    }
+    
+    .order-items-list::-webkit-scrollbar-thumb {
+        background: var(--primary-blue);
+        border-radius: 10px;
+    }
+</style>
+
 <div class="container-fluid py-4">
     <!-- Breadcrumb -->
     <nav aria-label="breadcrumb" class="mb-4">
-        <ol class="breadcrumb bg-light p-3 rounded">
+        <ol class="breadcrumb bg-blue-light p-3 rounded">
             <li class="breadcrumb-item">
-                <a href="<?php echo SITE_URL; ?>" class="text-decoration-none">
+                <a href="<?php echo SITE_URL; ?>" class="text-decoration-none text-blue">
                     <i class="fas fa-home me-1"></i> Home
                 </a>
             </li>
             <li class="breadcrumb-item">
-                <a href="<?php echo SITE_URL; ?>cart" class="text-decoration-none">Cart</a>
+                <a href="<?php echo SITE_URL; ?>cart" class="text-decoration-none text-blue">Cart</a>
             </li>
-            <li class="breadcrumb-item active" aria-current="page">Checkout</li>
+            <li class="breadcrumb-item active text-blue" aria-current="page">Checkout</li>
         </ol>
     </nav>
     
     <!-- Page Header -->
     <div class="row mb-5">
         <div class="col-12">
-            <h1 class="display-5 fw-bold mb-3">Checkout</h1>
-            <div class="progress" style="height: 4px;">
-                <div class="progress-bar bg-dark" role="progressbar" style="width: 33.33%;"></div>
+            <h1 class="display-5 fw-bold mb-3 text-blue">Checkout</h1>
+            <div class="progress mb-3" style="height: 8px;">
+                <div class="progress-bar" role="progressbar" style="width: 33.33%;"></div>
             </div>
             <div class="d-flex justify-content-between mt-2">
-                <span class="text-dark fw-bold">1. Shipping</span>
-                <span class="text-muted">2. Payment</span>
-                <span class="text-muted">3. Confirmation</span>
+                <div class="text-center">
+                    <div class="rounded-circle bg-blue text-white d-inline-flex align-items-center justify-content-center mb-2" 
+                         style="width: 30px; height: 30px;">
+                        1
+                    </div>
+                    <div class="fw-bold text-blue">Shipping</div>
+                </div>
+                <div class="text-center">
+                    <div class="rounded-circle bg-secondary text-white d-inline-flex align-items-center justify-content-center mb-2" 
+                         style="width: 30px; height: 30px;">
+                        2
+                    </div>
+                    <div class="text-muted">Payment</div>
+                </div>
+                <div class="text-center">
+                    <div class="rounded-circle bg-secondary text-white d-inline-flex align-items-center justify-content-center mb-2" 
+                         style="width: 30px; height: 30px;">
+                        3
+                    </div>
+                    <div class="text-muted">Confirmation</div>
+                </div>
             </div>
         </div>
     </div>
@@ -405,8 +642,8 @@ require_once __DIR__ . '/../includes/header.php';
             <!-- Left Column - Forms -->
             <div class="col-lg-8 mb-4">
                 <!-- Shipping Address -->
-                <div class="card border-0 shadow-sm mb-4">
-                    <div class="card-header bg-white py-3 border-0">
+                <div class="card border-blue shadow-sm mb-4">
+                    <div class="card-header bg-blue text-white py-3">
                         <h5 class="fw-bold mb-0">
                             <i class="fas fa-shipping-fast me-2"></i> Shipping Address
                         </h5>
@@ -420,6 +657,7 @@ require_once __DIR__ . '/../includes/header.php';
                                        name="new_shipping_address[full_name]"
                                        value="<?php echo htmlspecialchars($user['full_name'] ?? ''); ?>"
                                        required>
+                                <div class="invalid-feedback">Full name is required</div>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label fw-bold">Phone Number <span class="text-danger">*</span></label>
@@ -428,6 +666,7 @@ require_once __DIR__ . '/../includes/header.php';
                                        name="new_shipping_address[phone]"
                                        value="<?php echo htmlspecialchars($user['phone'] ?? ''); ?>"
                                        required>
+                                <div class="invalid-feedback">Phone number is required</div>
                             </div>
                             <div class="col-md-12">
                                 <label class="form-label fw-bold">Address Line 1 <span class="text-danger">*</span></label>
@@ -436,6 +675,7 @@ require_once __DIR__ . '/../includes/header.php';
                                        name="new_shipping_address[address_line1]"
                                        placeholder="Street address, P.O. Box, Company name"
                                        required>
+                                <div class="invalid-feedback">Address line 1 is required</div>
                             </div>
                             <div class="col-md-12">
                                 <label class="form-label fw-bold">Address Line 2</label>
@@ -450,6 +690,7 @@ require_once __DIR__ . '/../includes/header.php';
                                        class="form-control" 
                                        name="new_shipping_address[city]"
                                        required>
+                                <div class="invalid-feedback">City is required</div>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label fw-bold">State/Province <span class="text-danger">*</span></label>
@@ -457,6 +698,7 @@ require_once __DIR__ . '/../includes/header.php';
                                        class="form-control" 
                                        name="new_shipping_address[state]"
                                        required>
+                                <div class="invalid-feedback">State/Province is required</div>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label fw-bold">Postal Code <span class="text-danger">*</span></label>
@@ -464,6 +706,7 @@ require_once __DIR__ . '/../includes/header.php';
                                        class="form-control" 
                                        name="new_shipping_address[postal_code]"
                                        required>
+                                <div class="invalid-feedback">Postal code is required</div>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label fw-bold">Country <span class="text-danger">*</span></label>
@@ -475,15 +718,16 @@ require_once __DIR__ . '/../includes/header.php';
                                     <option value="Rwanda">Rwanda</option>
                                     <option value="Burundi">Burundi</option>
                                 </select>
+                                <div class="invalid-feedback">Country is required</div>
                             </div>
                         </div>
                         
                         <!-- Shipping Method -->
                         <div class="mt-4">
-                            <h6 class="fw-bold mb-3">Shipping Method</h6>
+                            <h6 class="fw-bold mb-3 text-dark-blue">Shipping Method</h6>
                             <div class="row g-3">
                                 <div class="col-md-6">
-                                    <div class="card border h-100">
+                                    <div class="card border h-100 shipping-method-card">
                                         <div class="card-body">
                                             <div class="form-check">
                                                 <input class="form-check-input" 
@@ -497,7 +741,7 @@ require_once __DIR__ . '/../includes/header.php';
                                                 </label>
                                                 <div class="mt-2">
                                                     <p class="mb-1 small">Delivery in 3-5 business days</p>
-                                                    <p class="mb-0 fw-bold">
+                                                    <p class="mb-0 fw-bold text-blue">
                                                         <?php if ($subtotal >= 5000): ?>
                                                             <span class="text-success">FREE</span>
                                                         <?php else: ?>
@@ -510,7 +754,7 @@ require_once __DIR__ . '/../includes/header.php';
                                     </div>
                                 </div>
                                 <div class="col-md-6">
-                                    <div class="card border h-100">
+                                    <div class="card border h-100 shipping-method-card">
                                         <div class="card-body">
                                             <div class="form-check">
                                                 <input class="form-check-input" 
@@ -523,7 +767,7 @@ require_once __DIR__ . '/../includes/header.php';
                                                 </label>
                                                 <div class="mt-2">
                                                     <p class="mb-1 small">Delivery in 1-2 business days</p>
-                                                    <p class="mb-0 fw-bold">Ksh 700.00</p>
+                                                    <p class="mb-0 fw-bold text-blue">Ksh 700.00</p>
                                                 </div>
                                             </div>
                                         </div>
@@ -535,8 +779,8 @@ require_once __DIR__ . '/../includes/header.php';
                 </div>
                 
                 <!-- Payment Method -->
-                <div class="card border-0 shadow-sm mb-4">
-                    <div class="card-header bg-white py-3 border-0">
+                <div class="card border-blue shadow-sm mb-4">
+                    <div class="card-header bg-blue text-white py-3">
                         <h5 class="fw-bold mb-0">
                             <i class="fas fa-credit-card me-2"></i> Payment Method
                         </h5>
@@ -544,7 +788,7 @@ require_once __DIR__ . '/../includes/header.php';
                     <div class="card-body">
                         <div class="row g-3">
                             <div class="col-md-6">
-                                <div class="card border h-100">
+                                <div class="card border h-100 payment-method-card">
                                     <div class="card-body">
                                         <div class="form-check">
                                             <input class="form-check-input" 
@@ -564,7 +808,7 @@ require_once __DIR__ . '/../includes/header.php';
                                 </div>
                             </div>
                             <div class="col-md-6">
-                                <div class="card border h-100">
+                                <div class="card border h-100 payment-method-card">
                                     <div class="card-body">
                                         <div class="form-check">
                                             <input class="form-check-input" 
@@ -583,7 +827,7 @@ require_once __DIR__ . '/../includes/header.php';
                                 </div>
                             </div>
                             <div class="col-md-6">
-                                <div class="card border h-100">
+                                <div class="card border h-100 payment-method-card">
                                     <div class="card-body">
                                         <div class="form-check">
                                             <input class="form-check-input" 
@@ -606,7 +850,7 @@ require_once __DIR__ . '/../includes/header.php';
                         <!-- Payment Details (conditional) -->
                         <div id="paymentDetails" class="mt-4" style="display: none;">
                             <div id="mpesaDetails" class="payment-method-details">
-                                <h6 class="fw-bold mb-3">M-Pesa Payment Details</h6>
+                                <h6 class="fw-bold mb-3 text-dark-blue">M-Pesa Payment Details</h6>
                                 <div class="alert alert-info">
                                     <p class="mb-2"><strong>How to pay with M-Pesa:</strong></p>
                                     <ol class="mb-0">
@@ -614,7 +858,7 @@ require_once __DIR__ . '/../includes/header.php';
                                         <li>Select "Lipa Na M-Pesa"</li>
                                         <li>Select "Pay Bill"</li>
                                         <li>Enter Business No: <strong>123456</strong></li>
-                                        <li>Enter Account No: <strong id="mpesaAccount"><?php echo $user['id'] ?? 'ORDER'; ?></strong></li>
+                                        <li>Enter Account No: <strong id="mpesaAccount"><?php echo $user['id'] ?? 'ORDER' . date('His'); ?></strong></li>
                                         <li>Enter Amount: <strong>Ksh <span id="mpesaAmount"><?php echo number_format($total, 2); ?></span></strong></li>
                                         <li>Enter your M-Pesa PIN</li>
                                     </ol>
@@ -626,10 +870,10 @@ require_once __DIR__ . '/../includes/header.php';
                 
                 <!-- Navigation -->
                 <div class="d-flex justify-content-between">
-                    <a href="<?php echo SITE_URL; ?>cart" class="btn btn-outline-dark btn-lg">
+                    <a href="<?php echo SITE_URL; ?>cart" class="btn btn-outline-blue btn-lg">
                         <i class="fas fa-arrow-left me-2"></i> Back to Cart
                     </a>
-                    <button type="submit" class="btn btn-dark btn-lg px-5" id="placeOrderBtn">
+                    <button type="submit" class="btn btn-primary-blue btn-lg px-5" id="placeOrderBtn">
                         Place Order <i class="fas fa-arrow-right ms-2"></i>
                     </button>
                 </div>
@@ -637,42 +881,47 @@ require_once __DIR__ . '/../includes/header.php';
             
             <!-- Right Column - Order Summary -->
             <div class="col-lg-4">
-                <div class="card border-0 shadow-sm sticky-top" style="top: 100px;">
-                    <div class="card-header bg-white py-3 border-0">
+                <div class="card border-blue shadow-sm sticky-top" style="top: 100px;">
+                    <div class="card-header bg-blue text-white py-3">
                         <h5 class="fw-bold mb-0">Order Summary</h5>
                     </div>
                     <div class="card-body">
                         <!-- Order Items -->
                         <div class="order-items mb-4">
-                            <h6 class="fw-bold mb-3">Items (<?php echo count($cartItems); ?>)</h6>
-                            <div class="order-items-list" style="max-height: 300px; overflow-y: auto;">
+                            <h6 class="fw-bold mb-3 text-dark-blue">Items (<?php echo count($cartItems); ?>)</h6>
+                            <div class="order-items-list">
                                 <?php foreach ($cartItems as $item): ?>
                                     <?php
                                     $product = $item['product'];
                                     $imageUrl = SITE_URL . ($product['primary_image'] ?: 'assets/images/placeholder.jpg');
                                     ?>
-                                    <div class="d-flex mb-3">
+                                    <div class="d-flex mb-3 pb-3 border-bottom">
                                         <div class="flex-shrink-0">
                                             <img src="<?php echo $imageUrl; ?>" 
-                                                 class="rounded" 
-                                                 style="width: 60px; height: 60px; object-fit: cover;"
-                                                 alt="<?php echo htmlspecialchars($product['name']); ?>">
+                                                class="rounded border" 
+                                                style="width: 60px; height: 60px; object-fit: cover;"
+                                                alt="<?php echo htmlspecialchars($product['name']); ?>">
                                         </div>
                                         <div class="flex-grow-1 ms-3">
-                                            <h6 class="fw-bold mb-1 small">
+                                            <h6 class="fw-bold mb-1 small text-dark">
                                                 <?php echo htmlspecialchars($product['name']); ?>
                                             </h6>
-                                            <?php if ($item['size']): ?>
+                                            <?php 
+                                            // Build variant description
+                                            $variantParts = [];
+                                            if (!empty($item['size'])) $variantParts[] = 'Size: ' . htmlspecialchars($item['size']);
+                                            if (!empty($item['color'])) $variantParts[] = 'Color: ' . htmlspecialchars($item['color']);
+                                            if (!empty($item['material'])) $variantParts[] = 'Material: ' . htmlspecialchars($item['material']);
+                                            
+                                            if (!empty($variantParts)): ?>
                                                 <small class="text-muted d-block">
-                                                    Size: <?php echo htmlspecialchars($item['size']); ?>
-                                                    <?php if ($item['color']): ?>
-                                                        • Color: <?php echo htmlspecialchars($item['color']); ?>
-                                                    <?php endif; ?>
+                                                    <?php echo implode(' • ', $variantParts); ?>
                                                 </small>
                                             <?php endif; ?>
-                                            <div class="d-flex justify-content-between align-items-center">
+                                            <div class="d-flex justify-content-between align-items-center mt-2">
                                                 <small class="text-muted">Qty: <?php echo $item['quantity']; ?></small>
-                                                <span class="fw-bold">
+                                                <span class="fw-bold text-blue">
+                                                    Ksh <?php echo number_format($item['price'], 2); ?> × <?php echo $item['quantity']; ?> = 
                                                     Ksh <?php echo number_format($item['total'], 2); ?>
                                                 </span>
                                             </div>
@@ -686,11 +935,11 @@ require_once __DIR__ . '/../includes/header.php';
                         <div class="order-totals mb-4">
                             <div class="d-flex justify-content-between mb-2">
                                 <span class="text-muted">Subtotal</span>
-                                <span class="fw-bold">Ksh <?php echo number_format($subtotal, 2); ?></span>
+                                <span class="fw-bold text-dark-blue">Ksh <?php echo number_format($subtotal, 2); ?></span>
                             </div>
                             <div class="d-flex justify-content-between mb-2">
                                 <span class="text-muted">Shipping</span>
-                                <span class="fw-bold" id="shippingSummary">
+                                <span class="fw-bold text-dark-blue" id="shippingSummary">
                                     <?php if ($shipping > 0): ?>
                                         Ksh <?php echo number_format($shipping, 2); ?>
                                     <?php else: ?>
@@ -700,12 +949,12 @@ require_once __DIR__ . '/../includes/header.php';
                             </div>
                             <div class="d-flex justify-content-between mb-3">
                                 <span class="text-muted">Tax (16% VAT)</span>
-                                <span class="fw-bold">Ksh <?php echo number_format($tax, 2); ?></span>
+                                <span class="fw-bold text-dark-blue">Ksh <?php echo number_format($tax, 2); ?></span>
                             </div>
                             <hr>
                             <div class="d-flex justify-content-between mb-3">
-                                <span class="fw-bold fs-5">Total</span>
-                                <span class="fw-bold fs-5 text-dark" id="totalSummary">
+                                <span class="fw-bold fs-5 text-dark-blue">Total</span>
+                                <span class="fw-bold fs-5 text-blue" id="totalSummary">
                                     Ksh <?php echo number_format($total, 2); ?>
                                 </span>
                             </div>
@@ -734,17 +983,17 @@ require_once __DIR__ . '/../includes/header.php';
                 <!-- Need Help? -->
                 <div class="card border-0 shadow-sm mt-4">
                     <div class="card-body text-center">
-                        <h6 class="fw-bold mb-3">
+                        <h6 class="fw-bold mb-3 text-dark-blue">
                             <i class="fas fa-question-circle me-2"></i> Need Help?
                         </h6>
                         <p class="small text-muted mb-3">
                             Have questions about your order or need assistance?
                         </p>
                         <div class="d-grid gap-2">
-                            <a href="tel:+254700000000" class="btn btn-outline-dark btn-sm">
+                            <a href="tel:+254700000000" class="btn btn-outline-blue btn-sm">
                                 <i class="fas fa-phone me-2"></i> Call Us
                             </a>
-                            <a href="mailto:support@linencloset.com" class="btn btn-outline-dark btn-sm">
+                            <a href="mailto:support@linencloset.com" class="btn btn-outline-blue btn-sm">
                                 <i class="fas fa-envelope me-2"></i> Email Us
                             </a>
                         </div>
@@ -757,10 +1006,15 @@ require_once __DIR__ . '/../includes/header.php';
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    // Initialize elements
+    const placeOrderBtn = document.getElementById('placeOrderBtn');
+    const checkoutForm = document.getElementById('checkoutForm');
+    
     // Payment method selection
     document.querySelectorAll('input[name="payment_method"]').forEach(radio => {
         radio.addEventListener('change', function() {
             updatePaymentDetails();
+            updatePaymentCardStyles();
         });
     });
     
@@ -768,26 +1022,55 @@ document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('input[name="shipping_method"]').forEach(radio => {
         radio.addEventListener('change', function() {
             updateShippingCost();
+            updateShippingCardStyles();
+        });
+    });
+    
+    // Form validation on input
+    const formInputs = checkoutForm.querySelectorAll('input[required], select[required]');
+    formInputs.forEach(input => {
+        input.addEventListener('blur', function() {
+            validateField(this);
+        });
+        
+        input.addEventListener('input', function() {
+            if (this.classList.contains('is-invalid')) {
+                validateField(this);
+            }
         });
     });
     
     // Place order button
-    document.getElementById('placeOrderBtn').addEventListener('click', function(e) {
-        e.preventDefault();
-        
-        // Validate form
-        if (validateForm()) {
-            // Show loading state
-            this.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> Processing...';
-            this.disabled = true;
+    if (placeOrderBtn) {
+        placeOrderBtn.addEventListener('click', function(e) {
+            e.preventDefault();
             
-            // Submit form
-            document.getElementById('checkoutForm').submit();
-        }
-    });
+            if (validateForm()) {
+                // Show loading state
+                const originalText = this.innerHTML;
+                this.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> Processing...';
+                this.disabled = true;
+                
+                // Add a small delay to show loading state
+                setTimeout(() => {
+                    checkoutForm.submit();
+                }, 500);
+            }
+        });
+    }
     
     // Initialize
     updatePaymentDetails();
+    updatePaymentCardStyles();
+    updateShippingCardStyles();
+    
+    // Set M-Pesa account number dynamically
+    const mpesaAccount = document.getElementById('mpesaAccount');
+    if (mpesaAccount) {
+        const userId = '<?php echo $user['id'] ?? ''; ?>';
+        const orderId = userId ? userId + Date.now().toString().slice(-4) : 'ORDER' + Date.now().toString().slice(-8);
+        mpesaAccount.textContent = orderId;
+    }
 });
 
 // Update payment details based on selection
@@ -801,11 +1084,50 @@ function updatePaymentDetails() {
     });
     
     if (paymentMethod === 'mpesa') {
-        document.getElementById('mpesaDetails').style.display = 'block';
-        paymentDetails.style.display = 'block';
+        const mpesaDetails = document.getElementById('mpesaDetails');
+        if (mpesaDetails) {
+            mpesaDetails.style.display = 'block';
+            paymentDetails.style.display = 'block';
+        }
     } else {
         paymentDetails.style.display = 'none';
     }
+}
+
+// Update payment card styles
+function updatePaymentCardStyles() {
+    const selectedMethod = document.querySelector('input[name="payment_method"]:checked')?.value;
+    
+    document.querySelectorAll('.payment-method-card').forEach(card => {
+        const radio = card.querySelector('input[type="radio"]');
+        if (radio && radio.value === selectedMethod) {
+            card.classList.add('border-blue');
+            card.style.borderWidth = '2px';
+            card.style.backgroundColor = '#f8f9fa';
+        } else {
+            card.classList.remove('border-blue');
+            card.style.borderWidth = '1px';
+            card.style.backgroundColor = '';
+        }
+    });
+}
+
+// Update shipping card styles
+function updateShippingCardStyles() {
+    const selectedMethod = document.querySelector('input[name="shipping_method"]:checked')?.value;
+    
+    document.querySelectorAll('.shipping-method-card').forEach(card => {
+        const radio = card.querySelector('input[type="radio"]');
+        if (radio && radio.value === selectedMethod) {
+            card.classList.add('border-blue');
+            card.style.borderWidth = '2px';
+            card.style.backgroundColor = '#f8f9fa';
+        } else {
+            card.classList.remove('border-blue');
+            card.style.borderWidth = '1px';
+            card.style.backgroundColor = '';
+        }
+    });
 }
 
 // Update shipping cost
@@ -816,10 +1138,10 @@ function updateShippingCost() {
     let shippingCost = 0;
     
     if (shippingMethod === 'standard') {
-        shippingCost = (subtotal >= 5000) ? 0 : 0;
+        shippingCost = (subtotal >= 5000) ? 0 : 300;
     } else if (shippingMethod === 'express') {
         shippingCost = 700;
-    }view
+    }
     
     // Update display
     const shippingSummary = document.getElementById('shippingSummary');
@@ -837,6 +1159,10 @@ function updateShippingCost() {
     
     if (totalSummary) {
         totalSummary.textContent = 'Ksh ' + total.toFixed(2);
+        totalSummary.classList.add('price-update');
+        setTimeout(() => {
+            totalSummary.classList.remove('price-update');
+        }, 500);
     }
     
     if (mpesaAmount) {
@@ -844,7 +1170,27 @@ function updateShippingCost() {
     }
 }
 
-// Validate form
+// Validate individual field
+function validateField(field) {
+    const errorElement = field.parentNode.querySelector('.invalid-feedback') || 
+                         field.parentNode.parentNode.querySelector('.invalid-feedback');
+    
+    if (!field.value.trim()) {
+        field.classList.add('is-invalid');
+        if (errorElement) {
+            errorElement.style.display = 'block';
+        }
+        return false;
+    } else {
+        field.classList.remove('is-invalid');
+        if (errorElement) {
+            errorElement.style.display = 'none';
+        }
+        return true;
+    }
+}
+
+// Validate entire form
 function validateForm() {
     let isValid = true;
     const errors = [];
@@ -864,7 +1210,10 @@ function validateForm() {
         const input = document.querySelector(`[name="${field.name}"]`);
         if (!input || !input.value.trim()) {
             errors.push(`${field.label} is required`);
+            input.classList.add('is-invalid');
             isValid = false;
+        } else {
+            input.classList.remove('is-invalid');
         }
     });
     
@@ -891,19 +1240,21 @@ function showErrorModal(errors) {
         <div class="modal fade" id="errorModal" tabindex="-1">
             <div class="modal-dialog">
                 <div class="modal-content">
-                    <div class="modal-header border-0">
-                        <h5 class="modal-title text-danger">
+                    <div class="modal-header border-0 bg-blue text-white">
+                        <h5 class="modal-title">
                             <i class="fas fa-exclamation-triangle me-2"></i> Please fix the following errors:
                         </h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
-                        <ul class="mb-0">
-                            ${errors.map(error => `<li>${error}</li>`).join('')}
-                        </ul>
+                        <div class="alert alert-danger">
+                            <ul class="mb-0">
+                                ${errors.map(error => `<li>${error}</li>`).join('')}
+                            </ul>
+                        </div>
                     </div>
                     <div class="modal-footer border-0">
-                        <button type="button" class="btn btn-dark" data-bs-dismiss="modal">OK</button>
+                        <button type="button" class="btn btn-primary-blue" data-bs-dismiss="modal">OK</button>
                     </div>
                 </div>
             </div>
@@ -922,6 +1273,14 @@ function showErrorModal(errors) {
     // Show modal
     const modal = new bootstrap.Modal(document.getElementById('errorModal'));
     modal.show();
+}
+
+// Add smooth scrolling for order items
+function scrollToElement(elementId) {
+    const element = document.getElementById(elementId);
+    if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
 }
 </script>
 

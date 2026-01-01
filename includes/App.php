@@ -328,5 +328,89 @@ class App {
         
         return null;
     }
+
+
+    /**
+     * Get product images for a specific variant
+     */
+    public static function getVariantImages($db, $productId, $variantId = null) {
+        if ($variantId) {
+            $stmt = $db->prepare("
+                SELECT pi.* 
+                FROM product_images pi
+                WHERE pi.product_id = ? 
+                AND (pi.variant_id = ? OR pi.variant_id IS NULL)
+                ORDER BY 
+                    CASE WHEN pi.variant_id = ? THEN 0 ELSE 1 END,
+                    pi.is_primary DESC,
+                    pi.sort_order ASC
+            ");
+            $stmt->execute([$productId, $variantId, $variantId]);
+        } else {
+            $stmt = $db->prepare("
+                SELECT pi.* 
+                FROM product_images pi
+                WHERE pi.product_id = ? 
+                AND pi.variant_id IS NULL
+                ORDER BY pi.is_primary DESC, pi.sort_order ASC
+            ");
+            $stmt->execute([$productId]);
+        }
+        
+        return $stmt->fetchAll();
+    }
+    
+    /**
+     * Get all images grouped by variant
+     */
+    public static function getImagesByVariant($db, $productId) {
+        $stmt = $db->prepare("
+            SELECT 
+                pi.*,
+                pv.id as variant_id,
+                pv.size,
+                pv.color,
+                CONCAT(
+                    COALESCE(pv.size, ''),
+                    CASE WHEN pv.size IS NOT NULL AND pv.color IS NOT NULL THEN ' - ' ELSE '' END,
+                    COALESCE(pv.color, '')
+                ) as variant_name
+            FROM product_images pi
+            LEFT JOIN product_variants pv ON pi.variant_id = pv.id
+            WHERE pi.product_id = ?
+            ORDER BY 
+                pv.is_default DESC,
+                pi.is_primary DESC,
+                pi.sort_order ASC
+        ");
+        $stmt->execute([$productId]);
+        
+        $images = $stmt->fetchAll();
+        $grouped = [
+            'general' => [], // Images without variant association
+            'variants' => [] // Images grouped by variant
+        ];
+        
+        foreach ($images as $image) {
+            if ($image['variant_id']) {
+                if (!isset($grouped['variants'][$image['variant_id']])) {
+                    $grouped['variants'][$image['variant_id']] = [
+                        'variant_info' => [
+                            'id' => $image['variant_id'],
+                            'size' => $image['size'],
+                            'color' => $image['color'],
+                            'name' => $image['variant_name']
+                        ],
+                        'images' => []
+                    ];
+                }
+                $grouped['variants'][$image['variant_id']]['images'][] = $image;
+            } else {
+                $grouped['general'][] = $image;
+            }
+        }
+        
+        return $grouped;
+    }
 }
 ?>

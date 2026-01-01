@@ -95,19 +95,23 @@ $fullTitle = htmlspecialchars($pageTitle) . ' | ' . htmlspecialchars(SITE_NAME);
     
     <!-- Custom CSS -->
     <link href="<?php echo SITE_URL; ?>assets/css/style.css" rel="stylesheet">
-    
+   <!-- In header.php or layout file -->
+<!-- <script src="<?php echo SITE_URL; ?>assets/js/wishlist.js"></script> -->
     <!-- Favicon -->
     <link rel="icon" type="image/x-icon" href="<?php echo SITE_URL; ?>assets/favicon.ico">
     
     <style>
-        :root {
-            --primary-color: #212529;
-            --secondary-color: #f8f9fa;
-            --accent-color: #6c757d;
-            --transition-speed: 0.3s;
-            --border-radius: 8px;
-            --box-shadow: 0 2px 15px rgba(0, 0, 0, 0.08);
-        }
+       :root {
+        --primary-color: #4361ee;
+        --primary-light: #eef2ff;
+        --secondary-color: #3a0ca3;
+        --accent-color: #f72585;
+        --dark-color: #1a1a2e;
+        --light-color: #f8f9fa;
+        --success-color: #4cc9f0;
+        --warning-color: #f8961e;
+        --danger-color: #f94144;
+    }
         
         .navbar-brand {
             font-weight: 700;
@@ -199,9 +203,10 @@ $fullTitle = htmlspecialchars($pageTitle) . ' | ' . htmlspecialchars(SITE_NAME);
         }
         
         .btn-login:hover {
-            background: #000;
+            background:var(--primary-color);
             transform: translateY(-2px);
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+             color: white;
         }
         
         .user-avatar {
@@ -270,6 +275,8 @@ $fullTitle = htmlspecialchars($pageTitle) . ' | ' . htmlspecialchars(SITE_NAME);
                 max-width: none;
             }
         }
+
+        
     </style>
 </head>
 <body>
@@ -319,7 +326,7 @@ $fullTitle = htmlspecialchars($pageTitle) . ' | ' . htmlspecialchars(SITE_NAME);
             <div class="d-flex align-items-center">
                 <!-- Desktop Actions -->
                 <div class="d-none d-lg-flex align-items-center">
-                    <!-- Wishlist -->
+                    
                     <!-- Wishlist -->
 <a href="<?php echo SITE_URL; ?>account/wishlist.php" class="nav-link position-relative me-2" 
    data-bs-toggle="tooltip" title="Wishlist" aria-label="Wishlist">

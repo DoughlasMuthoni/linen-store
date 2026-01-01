@@ -1,5 +1,5 @@
 <?php
-// /linen-closet/cart/index.php
+// /linen-closet/cart/index.php - UPDATED FOR VARIANTS
 
 require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/Database.php';
@@ -19,7 +19,7 @@ if (!isset($_SESSION['cart'])) {
 }
 
 $cart = $_SESSION['cart'];
-$cartCount = count($cart);
+$cartCount = 0;
 $subtotal = 0;
 $shipping = 0;
 $tax = 0;
@@ -28,50 +28,96 @@ $total = 0;
 // Fetch cart items with product details
 $cartItems = [];
 if (!empty($cart)) {
-    $productIds = array_keys($cart);
-    $placeholders = str_repeat('?,', count($productIds) - 1) . '?';
-    
-    $stmt = $db->prepare("
-        SELECT 
-            p.*,
-            (SELECT image_url FROM product_images pi WHERE pi.product_id = p.id AND pi.is_primary = 1 LIMIT 1) as primary_image,
-            c.name as category_name
-        FROM products p
-        LEFT JOIN categories c ON p.category_id = c.id
-        WHERE p.id IN ($placeholders) AND p.is_active = 1
-    ");
-    
-    $stmt->execute($productIds);
-    $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    foreach ($products as $product) {
-        $itemId = $product['id'];
-        $cartItem = $cart[$itemId];
-        $quantity = $cartItem['quantity'] ?? 1;
-        $price = $product['price'];
-        $itemTotal = $price * $quantity;
-        
-        $cartItems[] = [
-            'id' => $itemId,
-            'product' => $product,
-            'quantity' => $quantity,
-            'price' => $price,
-            'total' => $itemTotal,
-            'size' => $cartItem['size'] ?? null,
-            'color' => $cartItem['color'] ?? null,
-            'material' => $cartItem['material'] ?? null
-        ];
-        
-        $subtotal += $itemTotal;
+    // Get unique product IDs from cart items
+    $productIds = [];
+    foreach ($cart as $cartKey => $item) {
+        if (isset($item['product_id'])) {
+            $productIds[] = $item['product_id'];
+        }
     }
+    $productIds = array_unique($productIds);
     
-    // Calculate shipping (example: free over 5000, otherwise 300)
-    $shipping = ($subtotal >= 5000) ? 0 : 300;
-    
-    // Calculate tax (example: 16% VAT)
-    $tax = $subtotal * 0.16;
-    
-    $total = $subtotal + $shipping + $tax;
+    if (!empty($productIds)) {
+               // Get product details for all cart products
+        $placeholders = str_repeat('?,', count($productIds) - 1) . '?';
+        
+        // Debug: Check what we're passing
+        // echo "Product IDs: " . print_r($productIds, true);
+        // echo "Placeholders: " . $placeholders;
+        
+        $stmt = $db->prepare("
+            SELECT 
+                p.*,
+                (SELECT image_url FROM product_images pi WHERE pi.product_id = p.id AND pi.is_primary = 1 LIMIT 1) as primary_image,
+                c.name as category_name
+            FROM products p
+            LEFT JOIN categories c ON p.category_id = c.id
+            WHERE p.id IN ($placeholders) AND p.is_active = 1
+        ");
+        
+        // FIX: Ensure we pass the correct number of parameters
+        $stmt->execute(array_values($productIds));  // Use array_values() to ensure proper array format
+        $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        // Organize products by ID for easy lookup
+        $productsById = [];
+        foreach ($products as $product) {
+            $productsById[$product['id']] = $product;
+        }
+        
+        // Build cart items array
+        foreach ($cart as $cartKey => $cartItem) {
+            $productId = $cartItem['product_id'] ?? null;
+            
+            if ($productId && isset($productsById[$productId])) {
+                $product = $productsById[$productId];
+                $quantity = $cartItem['quantity'] ?? 1;
+                $price = $cartItem['price'] ?? $product['price'];
+                $itemTotal = $price * $quantity;
+                
+                // Build variant description
+                $variantDescription = '';
+                $variantParts = [];
+                if (!empty($cartItem['size'])) {
+                    $variantParts[] = 'Size: ' . htmlspecialchars($cartItem['size']);
+                }
+                if (!empty($cartItem['color'])) {
+                    $variantParts[] = 'Color: ' . htmlspecialchars($cartItem['color']);
+                }
+                if (!empty($cartItem['material'])) {
+                    $variantParts[] = 'Material: ' . htmlspecialchars($cartItem['material']);
+                }
+                if (!empty($variantParts)) {
+                    $variantDescription = implode(' • ', $variantParts);
+                }
+                
+                $cartItems[] = [
+                    'cart_key' => $cartKey,
+                    'id' => $productId,
+                    'product' => $product,
+                    'quantity' => $quantity,
+                    'price' => $price,
+                    'total' => $itemTotal,
+                    'size' => $cartItem['size'] ?? null,
+                    'color' => $cartItem['color'] ?? null,
+                    'material' => $cartItem['material'] ?? null,
+                    'variant_description' => $variantDescription,
+                    'variant_id' => $cartItem['variant_id'] ?? null
+                ];
+                
+                $cartCount += $quantity;
+                $subtotal += $itemTotal;
+            }
+        }
+        
+        // Calculate shipping (example: free over 5000, otherwise 300)
+        $shipping = ($subtotal >= 5000) ? 0 : 300;
+        
+        // Calculate tax (example: 16% VAT)
+        $tax = $subtotal * 0.16;
+        
+        $total = $subtotal + $shipping + $tax;
+    }
 }
 
 $pageTitle = "Shopping Cart (" . $cartCount . " items)";
@@ -79,25 +125,113 @@ $pageTitle = "Shopping Cart (" . $cartCount . " items)";
 require_once __DIR__ . '/../includes/header.php';
 ?>
 
+<style>
+    :root {
+        --primary-blue: #0d6efd;
+        --secondary-blue: #0dcaf0;
+        --dark-blue: #052c65;
+        --light-blue: #cfe2ff;
+    }
+    
+    .btn-primary-blue {
+        background-color: var(--primary-blue);
+        border-color: var(--primary-blue);
+        color: white;
+    }
+    
+    .btn-primary-blue:hover {
+        background-color: var(--dark-blue);
+        border-color: var(--dark-blue);
+        color: white;
+    }
+    
+    .btn-outline-blue {
+        color: var(--primary-blue);
+        border-color: var(--primary-blue);
+    }
+    
+    .btn-outline-blue:hover {
+        background-color: var(--primary-blue);
+        color: white;
+    }
+    
+    .text-blue {
+        color: var(--primary-blue) !important;
+    }
+    
+    .bg-blue-light {
+        background-color: var(--light-blue);
+    }
+    
+    .border-blue {
+        border-color: var(--primary-blue) !important;
+    }
+    
+    .quantity-selector .btn {
+        color: var(--primary-blue);
+        border-color: var(--primary-blue);
+    }
+    
+    .quantity-selector .btn:hover {
+        background-color: var(--primary-blue);
+        color: white;
+    }
+    
+    .quantity-selector .form-control {
+        border-color: var(--primary-blue);
+    }
+    
+    .recommended-product {
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        border: 1px solid #e0e0e0;
+    }
+    
+    .recommended-product:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 20px rgba(13, 110, 253, 0.1);
+        border-color: var(--primary-blue);
+    }
+    
+    .add-recommended-btn {
+        opacity: 0;
+        transition: opacity 0.3s ease;
+    }
+    
+    .recommended-product:hover .add-recommended-btn {
+        opacity: 1;
+    }
+    
+    .card-header.bg-blue {
+        background: linear-gradient(135deg, var(--primary-blue), var(--secondary-blue));
+        color: white;
+    }
+    
+    .badge-blue {
+        background-color: var(--primary-blue);
+        color: white;
+    }
+</style>
+
 <div class="container-fluid py-4">
     <!-- Breadcrumb -->
     <nav aria-label="breadcrumb" class="mb-4">
-        <ol class="breadcrumb bg-light p-3 rounded">
+        <ol class="breadcrumb bg-blue-light p-3 rounded">
             <li class="breadcrumb-item">
-                <a href="<?php echo SITE_URL; ?>" class="text-decoration-none">
+                <a href="<?php echo SITE_URL; ?>" class="text-decoration-none text-blue">
                     <i class="fas fa-home me-1"></i> Home
                 </a>
             </li>
-            <li class="breadcrumb-item active" aria-current="page">Shopping Cart</li>
+            <li class="breadcrumb-item active text-blue" aria-current="page">Shopping Cart</li>
         </ol>
     </nav>
     
     <!-- Page Header -->
     <div class="row mb-5">
         <div class="col-12">
-            <h1 class="display-5 fw-bold mb-3">Shopping Cart</h1>
+            <h1 class="display-5 fw-bold mb-3 text-blue">Shopping Cart</h1>
             <p class="text-muted lead">
                 <?php if ($cartCount > 0): ?>
+                    <span class="badge bg-primary rounded-pill"><?php echo $cartCount; ?></span>
                     You have <?php echo $cartCount; ?> item<?php echo $cartCount !== 1 ? 's' : ''; ?> in your cart
                 <?php else: ?>
                     Your cart is empty
@@ -115,7 +249,7 @@ require_once __DIR__ . '/../includes/header.php';
                     <div class="card-body p-0">
                         <div class="table-responsive">
                             <table class="table table-hover align-middle mb-0">
-                                <thead class="table-light">
+                                <thead class="bg-blue-light">
                                     <tr>
                                         <th style="width: 50px;"></th>
                                         <th>Product</th>
@@ -132,11 +266,12 @@ require_once __DIR__ . '/../includes/header.php';
                                         $imageUrl = SITE_URL . ($product['primary_image'] ?: 'assets/images/placeholder.jpg');
                                         $productUrl = SITE_URL . 'products/detail.php?slug=' . $product['slug'];
                                         ?>
-                                        <tr class="cart-item" data-product-id="<?php echo $item['id']; ?>">
+                                        <tr class="cart-item" data-cart-key="<?php echo htmlspecialchars($item['cart_key']); ?>">
                                             <td>
                                                 <input type="checkbox" 
                                                        class="form-check-input select-item" 
-                                                       value="<?php echo $item['id']; ?>"
+                                                       value="<?php echo htmlspecialchars($item['cart_key']); ?>"
+                                                       style="border-color: var(--primary-blue);"
                                                        checked>
                                             </td>
                                             <td>
@@ -144,19 +279,16 @@ require_once __DIR__ . '/../includes/header.php';
                                                     <a href="<?php echo $productUrl; ?>" class="text-decoration-none">
                                                         <img src="<?php echo $imageUrl; ?>" 
                                                              class="rounded me-3" 
-                                                             style="width: 80px; height: 80px; object-fit: cover;"
+                                                             style="width: 80px; height: 80px; object-fit: cover; border: 2px solid var(--light-blue);"
                                                              alt="<?php echo htmlspecialchars($product['name']); ?>">
                                                     </a>
                                                     <div>
-                                                        <a href="<?php echo $productUrl; ?>" class="text-decoration-none text-dark fw-bold">
+                                                        <a href="<?php echo $productUrl; ?>" class="text-decoration-none text-blue fw-bold">
                                                             <?php echo htmlspecialchars($product['name']); ?>
                                                         </a>
-                                                        <?php if ($item['size']): ?>
+                                                        <?php if (!empty($item['variant_description'])): ?>
                                                             <div class="text-muted small mt-1">
-                                                                <span class="me-3">Size: <?php echo htmlspecialchars($item['size']); ?></span>
-                                                                <?php if ($item['color']): ?>
-                                                                    <span>Color: <?php echo htmlspecialchars($item['color']); ?></span>
-                                                                <?php endif; ?>
+                                                                <?php echo $item['variant_description']; ?>
                                                             </div>
                                                         <?php endif; ?>
                                                         <div class="text-muted small">
@@ -166,41 +298,41 @@ require_once __DIR__ . '/../includes/header.php';
                                                 </div>
                                             </td>
                                             <td class="text-center">
-                                                <span class="price fw-bold">
+                                                <span class="price fw-bold text-blue">
                                                     Ksh <?php echo number_format($item['price'], 2); ?>
                                                 </span>
                                             </td>
                                             <td class="text-center">
                                                 <div class="quantity-selector d-inline-flex align-items-center">
                                                     <button type="button" 
-                                                            class="btn btn-outline-dark btn-sm decrease-qty"
-                                                            data-product-id="<?php echo $item['id']; ?>">
+                                                            class="btn btn-outline-blue btn-sm decrease-qty"
+                                                            data-cart-key="<?php echo htmlspecialchars($item['cart_key']); ?>">
                                                         <i class="fas fa-minus"></i>
                                                     </button>
                                                     <input type="number" 
-                                                           class="form-control text-center border-dark rounded-0 quantity-input"
+                                                           class="form-control text-center border-blue rounded-0 quantity-input"
                                                            value="<?php echo $item['quantity']; ?>"
                                                            min="1" 
                                                            max="99"
                                                            style="width: 60px;"
-                                                           data-product-id="<?php echo $item['id']; ?>"
+                                                           data-cart-key="<?php echo htmlspecialchars($item['cart_key']); ?>"
                                                            data-original-quantity="<?php echo $item['quantity']; ?>">
                                                     <button type="button" 
-                                                            class="btn btn-outline-dark btn-sm increase-qty"
-                                                            data-product-id="<?php echo $item['id']; ?>">
+                                                            class="btn btn-outline-blue btn-sm increase-qty"
+                                                            data-cart-key="<?php echo htmlspecialchars($item['cart_key']); ?>">
                                                         <i class="fas fa-plus"></i>
                                                     </button>
                                                 </div>
                                             </td>
                                             <td class="text-center">
-                                                <span class="item-total fw-bold text-dark">
+                                                <span class="item-total fw-bold text-blue">
                                                     Ksh <?php echo number_format($item['total'], 2); ?>
                                                 </span>
                                             </td>
                                             <td>
                                                 <button type="button" 
                                                         class="btn btn-outline-danger btn-sm remove-item"
-                                                        data-product-id="<?php echo $item['id']; ?>"
+                                                        data-cart-key="<?php echo htmlspecialchars($item['cart_key']); ?>"
                                                         title="Remove item">
                                                     <i class="fas fa-trash"></i>
                                                 </button>
@@ -221,35 +353,32 @@ require_once __DIR__ . '/../includes/header.php';
                         $imageUrl = SITE_URL . ($product['primary_image'] ?: 'assets/images/placeholder.jpg');
                         $productUrl = SITE_URL . 'products/detail.php?slug=' . $product['slug'];
                         ?>
-                        <div class="card border-0 shadow-sm mb-3 cart-item" data-product-id="<?php echo $item['id']; ?>">
+                        <div class="card border-0 shadow-sm mb-3 cart-item" data-cart-key="<?php echo htmlspecialchars($item['cart_key']); ?>">
                             <div class="card-body">
                                 <div class="row">
                                     <div class="col-3">
                                         <a href="<?php echo $productUrl; ?>" class="text-decoration-none">
                                             <img src="<?php echo $imageUrl; ?>" 
                                                  class="rounded w-100" 
-                                                 style="height: 100px; object-fit: cover;"
+                                                 style="height: 100px; object-fit: cover; border: 2px solid var(--light-blue);"
                                                  alt="<?php echo htmlspecialchars($product['name']); ?>">
                                         </a>
                                     </div>
                                     <div class="col-9">
                                         <div class="d-flex justify-content-between align-items-start mb-2">
                                             <div>
-                                                <a href="<?php echo $productUrl; ?>" class="text-decoration-none text-dark fw-bold">
+                                                <a href="<?php echo $productUrl; ?>" class="text-decoration-none text-blue fw-bold">
                                                     <?php echo htmlspecialchars($product['name']); ?>
                                                 </a>
-                                                <?php if ($item['size']): ?>
+                                                <?php if (!empty($item['variant_description'])): ?>
                                                     <div class="text-muted small mt-1">
-                                                        Size: <?php echo htmlspecialchars($item['size']); ?>
-                                                        <?php if ($item['color']): ?>
-                                                            • Color: <?php echo htmlspecialchars($item['color']); ?>
-                                                        <?php endif; ?>
+                                                        <?php echo $item['variant_description']; ?>
                                                     </div>
                                                 <?php endif; ?>
                                             </div>
                                             <button type="button" 
                                                     class="btn btn-outline-danger btn-sm remove-item"
-                                                    data-product-id="<?php echo $item['id']; ?>">
+                                                    data-cart-key="<?php echo htmlspecialchars($item['cart_key']); ?>">
                                                 <i class="fas fa-trash"></i>
                                             </button>
                                         </div>
@@ -257,29 +386,29 @@ require_once __DIR__ . '/../includes/header.php';
                                         <div class="d-flex justify-content-between align-items-center">
                                             <div class="quantity-selector d-flex align-items-center">
                                                 <button type="button" 
-                                                        class="btn btn-outline-dark btn-sm decrease-qty"
-                                                        data-product-id="<?php echo $item['id']; ?>">
+                                                        class="btn btn-outline-blue btn-sm decrease-qty"
+                                                        data-cart-key="<?php echo htmlspecialchars($item['cart_key']); ?>">
                                                     <i class="fas fa-minus"></i>
                                                 </button>
                                                 <input type="number" 
-                                                       class="form-control text-center border-dark rounded-0 quantity-input"
+                                                       class="form-control text-center border-blue rounded-0 quantity-input"
                                                        value="<?php echo $item['quantity']; ?>"
                                                        min="1" 
                                                        max="99"
                                                        style="width: 50px;"
-                                                       data-product-id="<?php echo $item['id']; ?>"
+                                                       data-cart-key="<?php echo htmlspecialchars($item['cart_key']); ?>"
                                                        data-original-quantity="<?php echo $item['quantity']; ?>">
                                                 <button type="button" 
-                                                        class="btn btn-outline-dark btn-sm increase-qty"
-                                                        data-product-id="<?php echo $item['id']; ?>">
+                                                        class="btn btn-outline-blue btn-sm increase-qty"
+                                                        data-cart-key="<?php echo htmlspecialchars($item['cart_key']); ?>">
                                                     <i class="fas fa-plus"></i>
                                                 </button>
                                             </div>
                                             <div class="text-end">
-                                                <div class="fw-bold">
+                                                <div class="fw-bold text-blue">
                                                     Ksh <?php echo number_format($item['price'], 2); ?>
                                                 </div>
-                                                <div class="item-total fw-bold text-dark">
+                                                <div class="item-total fw-bold text-blue">
                                                     Ksh <?php echo number_format($item['total'], 2); ?>
                                                 </div>
                                             </div>
@@ -294,11 +423,11 @@ require_once __DIR__ . '/../includes/header.php';
                 <!-- Cart Actions -->
                 <div class="d-flex justify-content-between align-items-center mt-4">
                     <div class="d-flex align-items-center">
-                        <input type="checkbox" id="selectAll" class="form-check-input me-2" checked>
-                        <label for="selectAll" class="form-check-label fw-medium">Select All</label>
+                        <input type="checkbox" id="selectAll" class="form-check-input me-2" style="border-color: var(--primary-blue);" checked>
+                        <label for="selectAll" class="form-check-label fw-medium text-blue">Select All</label>
                     </div>
                     <div class="d-flex gap-2">
-                        <button type="button" class="btn btn-outline-dark" id="updateCart">
+                        <button type="button" class="btn btn-outline-blue" id="updateCart">
                             <i class="fas fa-sync-alt me-2"></i> Update Cart
                         </button>
                         <button type="button" class="btn btn-outline-danger" id="clearCart">
@@ -309,7 +438,7 @@ require_once __DIR__ . '/../includes/header.php';
                 
                 <!-- Continue Shopping -->
                 <div class="mt-4">
-                    <a href="<?php echo SITE_URL; ?>products" class="btn btn-outline-dark">
+                    <a href="<?php echo SITE_URL; ?>products" class="btn btn-outline-blue">
                         <i class="fas fa-arrow-left me-2"></i> Continue Shopping
                     </a>
                 </div>
@@ -319,9 +448,9 @@ require_once __DIR__ . '/../includes/header.php';
                 <div class="text-center py-5">
                     <div class="py-5">
                         <i class="fas fa-shopping-cart fa-4x text-muted mb-4"></i>
-                        <h3 class="fw-bold mb-3">Your cart is empty</h3>
+                        <h3 class="fw-bold mb-3 text-blue">Your cart is empty</h3>
                         <p class="text-muted mb-4 lead">Looks like you haven't added any products to your cart yet.</p>
-                        <a href="<?php echo SITE_URL; ?>products" class="btn btn-dark btn-lg px-5">
+                        <a href="<?php echo SITE_URL; ?>products" class="btn btn-primary-blue btn-lg px-5">
                             <i class="fas fa-shopping-bag me-2"></i> Start Shopping
                         </a>
                     </div>
@@ -332,22 +461,24 @@ require_once __DIR__ . '/../includes/header.php';
         <!-- Order Summary -->
         <?php if ($cartCount > 0): ?>
             <div class="col-lg-4">
-                <div class="card border-0 shadow-sm sticky-top" style="top: 100px;">
-                    <div class="card-header bg-white py-3 border-0">
-                        <h5 class="fw-bold mb-0">Order Summary</h5>
+                <div class="card border-blue shadow-sm" style="position: sticky; top: 100px;">
+                    <div class="card-header bg-blue text-white py-3">
+                        <h5 class="fw-bold mb-0">
+                            <i class="fas fa-receipt me-2"></i> Order Summary
+                        </h5>
                     </div>
                     <div class="card-body">
                         <!-- Summary Items -->
                         <div class="mb-3">
                             <div class="d-flex justify-content-between mb-2">
                                 <span class="text-muted">Subtotal</span>
-                                <span class="fw-bold" id="subtotalAmount">
+                                <span class="fw-bold text-blue" id="subtotalAmount">
                                     Ksh <?php echo number_format($subtotal, 2); ?>
                                 </span>
                             </div>
                             <div class="d-flex justify-content-between mb-2">
                                 <span class="text-muted">Shipping</span>
-                                <span class="fw-bold" id="shippingAmount">
+                                <span class="fw-bold text-blue" id="shippingAmount">
                                     <?php if ($shipping > 0): ?>
                                         Ksh <?php echo number_format($shipping, 2); ?>
                                     <?php else: ?>
@@ -357,14 +488,14 @@ require_once __DIR__ . '/../includes/header.php';
                             </div>
                             <div class="d-flex justify-content-between mb-3">
                                 <span class="text-muted">Tax (16% VAT)</span>
-                                <span class="fw-bold" id="taxAmount">
+                                <span class="fw-bold text-blue" id="taxAmount">
                                     Ksh <?php echo number_format($tax, 2); ?>
                                 </span>
                             </div>
                             <hr>
                             <div class="d-flex justify-content-between mb-3">
-                                <span class="fw-bold fs-5">Total</span>
-                                <span class="fw-bold fs-5 text-dark" id="totalAmount">
+                                <span class="fw-bold fs-5 text-blue">Total</span>
+                                <span class="fw-bold fs-5 text-blue" id="totalAmount">
                                     Ksh <?php echo number_format($total, 2); ?>
                                 </span>
                             </div>
@@ -372,13 +503,15 @@ require_once __DIR__ . '/../includes/header.php';
                         
                         <!-- Shipping Estimate -->
                         <div class="mb-4">
-                            <h6 class="fw-bold mb-3">Shipping Estimate</h6>
+                            <h6 class="fw-bold mb-3 text-blue">
+                                <i class="fas fa-truck me-2"></i> Shipping Estimate
+                            </h6>
                             <div class="input-group">
                                 <input type="text" 
-                                       class="form-control" 
+                                       class="form-control border-blue" 
                                        placeholder="Enter postal code"
                                        id="postalCode">
-                                <button class="btn btn-outline-dark" type="button" id="calculateShipping">
+                                <button class="btn btn-outline-blue" type="button" id="calculateShipping">
                                     Calculate
                                 </button>
                             </div>
@@ -387,13 +520,15 @@ require_once __DIR__ . '/../includes/header.php';
                         
                         <!-- Discount Code -->
                         <div class="mb-4">
-                            <h6 class="fw-bold mb-3">Discount Code</h6>
+                            <h6 class="fw-bold mb-3 text-blue">
+                                <i class="fas fa-tag me-2"></i> Discount Code
+                            </h6>
                             <div class="input-group">
                                 <input type="text" 
-                                       class="form-control" 
+                                       class="form-control border-blue" 
                                        placeholder="Enter discount code"
                                        id="discountCode">
-                                <button class="btn btn-outline-dark" type="button" id="applyDiscount">
+                                <button class="btn btn-outline-blue" type="button" id="applyDiscount">
                                     Apply
                                 </button>
                             </div>
@@ -402,7 +537,7 @@ require_once __DIR__ . '/../includes/header.php';
                         
                         <!-- Checkout Button -->
                         <a href="<?php echo SITE_URL; ?>cart/checkout" 
-                           class="btn btn-dark btn-lg w-100 py-3 mb-3"
+                           class="btn btn-primary-blue btn-lg w-100 py-3 mb-3"
                            id="checkoutBtn">
                             <i class="fas fa-lock me-2"></i> Proceed to Checkout
                         </a>
@@ -431,82 +566,129 @@ require_once __DIR__ . '/../includes/header.php';
                         </div>
                     </div>
                 </div>
-                
-                <!-- Recommended Products -->
-                <?php if (!empty($cartItems)): ?>
-                    <div class="card border-0 shadow-sm mt-4">
-                        <div class="card-header bg-white py-3 border-0">
-                            <h6 class="fw-bold mb-0">
-                                <i class="fas fa-fire text-danger me-2"></i> Frequently Bought Together
-                            </h6>
-                        </div>
-                        <div class="card-body">
-                            <?php
-                            // Fetch recommended products based on cart items
-                            $categoryIds = [];
-                            foreach ($cartItems as $item) {
-                                if (!empty($item['product']['category_id'])) {
-                                    $categoryIds[] = $item['product']['category_id'];
-                                }
-                            }
-                            $categoryIds = array_unique($categoryIds);
-                            
-                            $recommendedProducts = [];
-                            if (!empty($categoryIds)) {
-                                $placeholders = str_repeat('?,', count($categoryIds) - 1) . '?';
-                                $cartProductIds = array_keys($cart);
-                                
-                                $recommendedStmt = $db->prepare("
-                                    SELECT 
-                                        p.*,
-                                        (SELECT image_url FROM product_images pi WHERE pi.product_id = p.id AND pi.is_primary = 1 LIMIT 1) as primary_image
-                                    FROM products p
-                                    WHERE p.category_id IN ($placeholders) 
-                                      AND p.is_active = 1
-                                      AND p.id NOT IN (" . (!empty($cartProductIds) ? implode(',', array_fill(0, count($cartProductIds), '?')) : '0') . ")
-                                    ORDER BY RAND()
-                                    LIMIT 3
-                                ");
-                                
-                                $params = array_merge($categoryIds, $cartProductIds);
-                                $recommendedStmt->execute($params);
-                                $recommendedProducts = $recommendedStmt->fetchAll(PDO::FETCH_ASSOC);
-                            }
-                            ?>
-                            
-                            <?php if (!empty($recommendedProducts)): ?>
-                                <div class="row g-2">
-                                    <?php foreach ($recommendedProducts as $recProduct): ?>
-                                        <div class="col-4" data-recommended-id="<?php echo $recProduct['id']; ?>">
-                                            <a href="<?php echo SITE_URL; ?>products/detail.php?slug=<?php echo $recProduct['slug']; ?>" 
-                                               class="text-decoration-none">
-                                                <img src="<?php echo SITE_URL . ($recProduct['primary_image'] ?: 'assets/images/placeholder.jpg'); ?>" 
-                                                     class="rounded w-100" 
-                                                     style="height: 80px; object-fit: cover;"
-                                                     alt="<?php echo htmlspecialchars($recProduct['name']); ?>">
-                                                <small class="d-block text-dark mt-1 text-truncate">
-                                                    <?php echo htmlspecialchars($recProduct['name']); ?>
-                                                </small>
-                                                <small class="text-success fw-bold">
-                                                    Ksh <?php echo number_format($recProduct['price'], 2); ?>
-                                                </small>
-                                            </a>
-                                        </div>
-                                    <?php endforeach; ?>
-                                </div>
-                                
-                                <button type="button" class="btn btn-outline-dark btn-sm w-100 mt-3" id="addAllRecommended">
-                                    <i class="fas fa-cart-plus me-2"></i> Add All to Cart
-                                </button>
-                            <?php else: ?>
-                                <p class="text-muted small mb-0">No recommendations available at the moment.</p>
-                            <?php endif; ?>
-                        </div>
-                    </div>
-                <?php endif; ?>
             </div>
         <?php endif; ?>
     </div>
+    
+    <!-- Frequently Bought Together Section -->
+    <?php if (!empty($cartItems)): ?>
+        <div class="row mt-5">
+            <div class="col-12">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-header bg-white py-3 border-0">
+                        <h5 class="fw-bold mb-2 text-blue">
+                            <i class="fas fa-fire text-warning me-2"></i> Frequently Bought Together
+                        </h5>
+                        <small class="text-muted">Customers who bought these items also bought these products</small>
+                    </div>
+                    <div class="card-body">
+                        <?php
+                        // Fetch recommended products based on cart items
+                        $categoryIds = [];
+                        foreach ($cartItems as $item) {
+                            if (!empty($item['product']['category_id'])) {
+                                $categoryIds[] = $item['product']['category_id'];
+                            }
+                        }
+                        $categoryIds = array_unique($categoryIds);
+                        
+                        $recommendedProducts = [];
+                        if (!empty($categoryIds)) {
+                            $placeholders = str_repeat('?,', count($categoryIds) - 1) . '?';
+                            $cartProductIds = array_column($cartItems, 'id');
+                            
+                            $recommendedStmt = $db->prepare("
+                                SELECT 
+                                    p.*,
+                                    (SELECT image_url FROM product_images pi WHERE pi.product_id = p.id AND pi.is_primary = 1 LIMIT 1) as primary_image
+                                FROM products p
+                                WHERE p.category_id IN ($placeholders) 
+                                  AND p.is_active = 1
+                                  AND p.id NOT IN (" . (!empty($cartProductIds) ? implode(',', array_fill(0, count($cartProductIds), '?')) : '0') . ")
+                                ORDER BY RAND()
+                                LIMIT 4
+                            ");
+                            
+                            $params = array_merge(array_values($categoryIds), array_values($cartProductIds));
+                            $recommendedStmt->execute($params);
+                            $recommendedProducts = $recommendedStmt->fetchAll(PDO::FETCH_ASSOC);
+                        }
+                        ?>
+                        
+                        <?php if (!empty($recommendedProducts)): ?>
+                            <div class="row g-4">
+                                <?php foreach ($recommendedProducts as $recProduct): ?>
+                                    <div class="col-lg-3 col-md-6 col-sm-6 col-6" data-recommended-id="<?php echo $recProduct['id']; ?>">
+                                        <div class="recommended-product card h-100 border-1">
+                                            <a href="<?php echo SITE_URL; ?>products/detail.php?slug=<?php echo $recProduct['slug']; ?>" 
+                                               class="text-decoration-none">
+                                                <div class="position-relative overflow-hidden" style="height: 180px;">
+                                                    <img src="<?php echo SITE_URL . ($recProduct['primary_image'] ?: 'assets/images/placeholder.jpg'); ?>" 
+                                                         class="w-100 h-100 object-fit-cover"
+                                                         alt="<?php echo htmlspecialchars($recProduct['name']); ?>">
+                                                    <button type="button" 
+                                                            class="btn btn-primary-blue btn-sm position-absolute top-0 end-0 m-2 p-2 rounded-circle add-recommended-btn"
+                                                            data-product-id="<?php echo $recProduct['id']; ?>"
+                                                            title="Add to cart">
+                                                        <i class="fas fa-cart-plus"></i>
+                                                    </button>
+                                                    <?php if (isset($recProduct['compare_price']) && $recProduct['compare_price'] > $recProduct['price']): ?>
+                                                        <span class="position-absolute top-0 start-0 m-2 badge bg-danger">
+                                                            Save <?php echo number_format((($recProduct['compare_price'] - $recProduct['price']) / $recProduct['compare_price']) * 100, 0); ?>%
+                                                        </span>
+                                                    <?php endif; ?>
+                                                </div>
+                                                <div class="card-body">
+                                                    <h6 class="card-title text-dark mb-2 text-truncate" style="font-size: 0.9rem;">
+                                                        <?php echo htmlspecialchars($recProduct['name']); ?>
+                                                    </h6>
+                                                    <div class="d-flex justify-content-between align-items-center">
+                                                        <div>
+                                                            <div class="text-blue fw-bold fs-5">
+                                                                Ksh <?php echo number_format($recProduct['price'], 2); ?>
+                                                            </div>
+                                                            <?php if (isset($recProduct['compare_price']) && $recProduct['compare_price'] > $recProduct['price']): ?>
+                                                                <div class="text-muted text-decoration-line-through small">
+                                                                    Ksh <?php echo number_format($recProduct['compare_price'], 2); ?>
+                                                                </div>
+                                                            <?php endif; ?>
+                                                        </div>
+                                                        <div class="text-warning small">
+                                                            <i class="fas fa-star"></i>
+                                                            <i class="fas fa-star"></i>
+                                                            <i class="fas fa-star"></i>
+                                                            <i class="fas fa-star"></i>
+                                                            <i class="fas fa-star-half-alt"></i>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </a>
+                                        </div>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                            
+                            <!-- Add All Button -->
+                            <div class="row mt-4">
+                                <div class="col-12">
+                                    <div class="d-flex justify-content-center">
+                                        <button type="button" class="btn btn-primary-blue px-5" id="addAllRecommended">
+                                            <i class="fas fa-cart-plus me-2"></i> Add All to Cart
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        <?php else: ?>
+                            <div class="text-center py-5">
+                                <i class="fas fa-box-open fa-3x text-muted mb-3"></i>
+                                <p class="text-muted mb-0">No recommendations available at the moment.</p>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+        </div>
+    <?php endif; ?>
 </div>
 
 <!-- Toast Container -->
@@ -522,390 +704,9 @@ require_once __DIR__ . '/../includes/header.php';
     </div>
 </div>
 
-<style>
-.cart-item {
-    transition: background-color 0.3s ease;
-}
-
-.cart-item:hover {
-    background-color: #f8f9fa;
-}
-
-.quantity-selector input[type="number"] {
-    -moz-appearance: textfield;
-}
-
-.quantity-selector input[type="number"]::-webkit-outer-spin-button,
-.quantity-selector input[type="number"]::-webkit-inner-spin-button {
-    -webkit-appearance: none;
-    margin: 0;
-}
-
-.sticky-top {
-    position: sticky;
-    z-index: 100;
-}
-
-.text-truncate {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-@media (max-width: 768px) {
-    .display-5 {
-        font-size: 2rem;
-    }
-    
-    .cart-item .quantity-selector {
-        width: 120px;
-    }
-}
-
-#checkoutBtn.disabled {
-    opacity: 0.65;
-    cursor: not-allowed;
-}
-</style>
-
 <script>
-
-// Production-ready AJAX handler
-async function ajaxRequest(url, data = null, method = 'POST') {
-    const options = {
-        method: method,
-        headers: {
-            'Content-Type': 'application/json',
-            'X-Requested-With': 'XMLHttpRequest'
-        },
-        credentials: 'same-origin' // Include cookies for sessions
-    };
-    
-    if (data) {
-        options.body = JSON.stringify(data);
-    }
-    
-    try {
-        const response = await fetch(url, options);
-        
-        // Check if response is JSON
-        const contentType = response.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-            throw new Error(`Server returned ${response.status}: ${response.statusText}`);
-        }
-        
-        const result = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(result.message || `HTTP ${response.status}`);
-        }
-        
-        return result;
-        
-    } catch (error) {
-        console.error('AJAX Error:', error.message, 'URL:', url);
-        
-        // Show user-friendly error
-        showToast(
-            error.message.includes('Failed to fetch') 
-                ? 'Network error. Please check your connection.' 
-                : 'Server error. Please try again.',
-            'error'
-        );
-        
-        throw error;
-    }
-}
-
-// Updated updateCartItem function
-// Update cart item
-async function updateCartItem(productId, quantity) {
-    try {
-        const data = await ajaxRequest(
-            '<?php echo SITE_URL; ?>ajax/update-cart.php',
-            { product_id: productId, quantity: quantity }
-        );
-        
-        if (data.success) {
-            updateCartDisplay(data.cart);
-            showToast(data.message || 'Cart updated successfully!');
-        } else {
-            showToast(data.message || 'Failed to update cart', 'error');
-        }
-    } catch (error) {
-        // Error already handled in ajaxRequest
-    }
-}
-
-// Remove item
-async function removeCartItem(productId) {
-    if (!confirm('Are you sure you want to remove this item from your cart?')) {
-        return;
-    }
-    
-    try {
-        const data = await ajaxRequest(
-            '<?php echo SITE_URL; ?>ajax/remove-from-cart.php',
-            { product_id: productId }
-        );
-        
-        if (data.success) {
-            document.querySelectorAll(`.cart-item[data-product-id="${productId}"]`).forEach(el => el.remove());
-            updateCartDisplay(data.cart);
-            showToast(data.message || 'Item removed from cart');
-        } else {
-            showToast(data.message || 'Failed to remove item', 'error');
-        }
-    } catch (error) {
-        // Error handled
-    }
-}
-
-// Calculate shipping
-async function calculateShipping() {
-    const postalCode = document.getElementById('postalCode').value.trim();
-    const subtotal = <?php echo $subtotal; ?>;
-    
-    if (!postalCode) {
-        showToast('Please enter a postal code', 'error');
-        return;
-    }
-    
-    try {
-        const data = await ajaxRequest(
-            '<?php echo SITE_URL; ?>ajax/calculate-shipping.php',
-            { postal_code: postalCode, subtotal: subtotal }
-        );
-        
-        const resultDiv = document.getElementById('shippingEstimateResult');
-        
-        if (data.success) {
-            resultDiv.innerHTML = `
-                <div class="alert alert-success p-2 mb-0">
-                    <i class="fas fa-check-circle me-2"></i>
-                    ${data.message}
-                    <br><small>Estimated delivery: ${data.estimated_days} business days</small>
-                </div>
-            `;
-            
-            // Update order summary with new shipping
-            if (data.shipping !== undefined) {
-                document.getElementById('shippingAmount').innerHTML = data.shipping === 0 
-                    ? '<span class="text-success">FREE</span>' 
-                    : 'Ksh ' + data.shipping.toFixed(2);
-                
-                // Recalculate total
-                const newTotal = <?php echo $subtotal; ?> + data.shipping + (<?php echo $subtotal; ?> * 0.16);
-                document.getElementById('totalAmount').textContent = 'Ksh ' + newTotal.toFixed(2);
-            }
-        } else {
-            resultDiv.innerHTML = `
-                <div class="alert alert-danger p-2 mb-0">
-                    <i class="fas fa-exclamation-circle me-2"></i>
-                    ${data.message}
-                </div>
-            `;
-        }
-    } catch (error) {
-        // Error handled
-    }
-}
-
-// Apply discount
-async function applyDiscount() {
-    const code = document.getElementById('discountCode').value.trim();
-    const subtotal = <?php echo $subtotal; ?>;
-    
-    if (!code) {
-        showToast('Please enter a discount code', 'error');
-        return;
-    }
-    
-    try {
-        const data = await ajaxRequest(
-            '<?php echo SITE_URL; ?>ajax/apply-discount.php',
-            { code: code, subtotal: subtotal }
-        );
-        
-        const resultDiv = document.getElementById('discountResult');
-        
-        if (data.success) {
-            resultDiv.innerHTML = `
-                <div class="alert alert-success p-2 mb-0">
-                    <i class="fas fa-check-circle me-2"></i>
-                    ${data.message}
-                    ${data.discount?.amount ? `<br><small>Discount: Ksh ${data.discount.amount.toFixed(2)}</small>` : ''}
-                </div>
-            `;
-            
-            // Update order summary with new totals
-            if (data.new_totals) {
-                document.getElementById('subtotalAmount').textContent = 'Ksh ' + data.new_totals.subtotal.toFixed(2);
-                document.getElementById('shippingAmount').innerHTML = data.new_totals.shipping === 0 
-                    ? '<span class="text-success">FREE</span>' 
-                    : 'Ksh ' + data.new_totals.shipping.toFixed(2);
-                document.getElementById('taxAmount').textContent = 'Ksh ' + data.new_totals.tax.toFixed(2);
-                document.getElementById('totalAmount').textContent = 'Ksh ' + data.new_totals.total.toFixed(2);
-            }
-        } else {
-            resultDiv.innerHTML = `
-                <div class="alert alert-danger p-2 mb-0">
-                    <i class="fas fa-exclamation-circle me-2"></i>
-                    ${data.message}
-                </div>
-            `;
-        }
-    } catch (error) {
-        // Error handled
-    }
-}
-document.addEventListener('DOMContentLoaded', function() {
-    // Initialize Bootstrap toasts
-    const toastEl = document.getElementById('cartToast');
-    const cartToast = toastEl ? new bootstrap.Toast(toastEl) : null;
-    
-    // Quantity controls
-    document.querySelectorAll('.decrease-qty').forEach(btn => {
-        btn.addEventListener('click', function(e) {
-            e.preventDefault();
-            const productId = this.dataset.productId;
-            const input = document.querySelector(`.quantity-input[data-product-id="${productId}"]`);
-            if (parseInt(input.value) > 1) {
-                input.value = parseInt(input.value) - 1;
-                updateCartItem(productId, input.value);
-            }
-        });
-    });
-    
-    document.querySelectorAll('.increase-qty').forEach(btn => {
-        btn.addEventListener('click', function(e) {
-            e.preventDefault();
-            const productId = this.dataset.productId;
-            const input = document.querySelector(`.quantity-input[data-product-id="${productId}"]`);
-            if (parseInt(input.value) < 99) {
-                input.value = parseInt(input.value) + 1;
-                updateCartItem(productId, input.value);
-            }
-        });
-    });
-    
-    // Quantity input change
-    document.querySelectorAll('.quantity-input').forEach(input => {
-        input.addEventListener('change', function(e) {
-            e.preventDefault();
-            const productId = this.dataset.productId;
-            const quantity = parseInt(this.value) || 1;
-            if (quantity >= 1 && quantity <= 99) {
-                updateCartItem(productId, quantity);
-            } else {
-                this.value = 1;
-                updateCartItem(productId, 1);
-            }
-        });
-    });
-    
-    // Remove item
-    document.querySelectorAll('.remove-item').forEach(btn => {
-        btn.addEventListener('click', function(e) {
-            e.preventDefault();
-            const productId = this.dataset.productId;
-            removeCartItem(productId);
-        });
-    });
-    
-    // Select all checkbox
-    const selectAllCheckbox = document.getElementById('selectAll');
-    if (selectAllCheckbox) {
-        selectAllCheckbox.addEventListener('change', function() {
-            const checkboxes = document.querySelectorAll('.select-item');
-            checkboxes.forEach(cb => cb.checked = this.checked);
-            updateCheckoutButton();
-        });
-    }
-    
-    // Individual item checkbox
-    document.querySelectorAll('.select-item').forEach(cb => {
-        cb.addEventListener('change', function() {
-            // Update "Select All" checkbox state
-            const allChecked = document.querySelectorAll('.select-item:checked').length === document.querySelectorAll('.select-item').length;
-            const someChecked = document.querySelectorAll('.select-item:checked').length > 0;
-            
-            if (selectAllCheckbox) {
-                selectAllCheckbox.checked = allChecked;
-                selectAllCheckbox.indeterminate = someChecked && !allChecked;
-            }
-            
-            updateCheckoutButton();
-        });
-    });
-    
-    // Update cart button
-    const updateCartBtn = document.getElementById('updateCart');
-    if (updateCartBtn) {
-        updateCartBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            updateCart();
-        });
-    }
-    
-    // Clear cart button
-    const clearCartBtn = document.getElementById('clearCart');
-    if (clearCartBtn) {
-        clearCartBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            clearCart();
-        });
-    }
-    
-    // Calculate shipping
-    const calculateShippingBtn = document.getElementById('calculateShipping');
-    if (calculateShippingBtn) {
-        calculateShippingBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            calculateShipping();
-        });
-        
-        // Allow pressing Enter in postal code field
-        document.getElementById('postalCode')?.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                calculateShipping();
-            }
-        });
-    }
-    
-    // Apply discount
-    const applyDiscountBtn = document.getElementById('applyDiscount');
-    if (applyDiscountBtn) {
-        applyDiscountBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            applyDiscount();
-        });
-        
-        // Allow pressing Enter in discount field
-        document.getElementById('discountCode')?.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                applyDiscount();
-            }
-        });
-    }
-    
-    // Add all recommended products
-    const addAllRecommendedBtn = document.getElementById('addAllRecommended');
-    if (addAllRecommendedBtn) {
-        addAllRecommendedBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            addAllRecommended();
-        });
-    }
-    
-    // Initialize checkout button state
-    updateCheckoutButton();
-});
-
 // Update cart item via AJAX
-async function updateCartItem(productId, quantity) {
+async function updateCartItem(cartKey, quantity) {
     try {
         const response = await fetch('<?php echo SITE_URL; ?>ajax/update-cart.php', {
             method: 'POST',
@@ -913,7 +714,7 @@ async function updateCartItem(productId, quantity) {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                product_id: productId,
+                cart_key: cartKey,
                 quantity: quantity
             })
         });
@@ -933,7 +734,7 @@ async function updateCartItem(productId, quantity) {
 }
 
 // Remove cart item via AJAX
-async function removeCartItem(productId) {
+async function removeCartItem(cartKey) {
     if (!confirm('Are you sure you want to remove this item from your cart?')) {
         return;
     }
@@ -945,7 +746,7 @@ async function removeCartItem(productId) {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                product_id: productId
+                cart_key: cartKey
             })
         });
         
@@ -953,7 +754,7 @@ async function removeCartItem(productId) {
         
         if (data.success) {
             // Remove item from DOM
-            document.querySelectorAll(`.cart-item[data-product-id="${productId}"]`).forEach(el => el.remove());
+            document.querySelectorAll(`.cart-item[data-cart-key="${cartKey}"]`).forEach(el => el.remove());
             
             updateCartDisplay(data.cart);
             showToast('Item removed from cart');
@@ -968,11 +769,13 @@ async function removeCartItem(productId) {
 
 // Update cart display
 function updateCartDisplay(cartData) {
+    console.log('Cart data received:', cartData); // For debugging
+    
     // Update cart count in header
     const cartCountElements = document.querySelectorAll('.cart-count');
     cartCountElements.forEach(element => {
-        element.textContent = cartData.count;
-        element.classList.toggle('d-none', cartData.count === 0);
+        element.textContent = cartData.count || 0;
+        element.classList.toggle('d-none', (cartData.count || 0) === 0);
     });
     
     // Update page title
@@ -993,34 +796,18 @@ function updateCartDisplay(cartData) {
     
     // Update order summary
     if (document.getElementById('subtotalAmount')) {
-        document.getElementById('subtotalAmount').textContent = 'Ksh ' + cartData.subtotal.toFixed(2);
+        document.getElementById('subtotalAmount').textContent = 'Ksh ' + (cartData.subtotal || 0).toFixed(2);
         document.getElementById('shippingAmount').innerHTML = cartData.shipping > 0 
-            ? 'Ksh ' + cartData.shipping.toFixed(2) 
+            ? 'Ksh ' + (cartData.shipping || 0).toFixed(2) 
             : '<span class="text-success">FREE</span>';
-        document.getElementById('taxAmount').textContent = 'Ksh ' + cartData.tax.toFixed(2);
-        document.getElementById('totalAmount').textContent = 'Ksh ' + cartData.total.toFixed(2);
+        document.getElementById('taxAmount').textContent = 'Ksh ' + (cartData.tax || 0).toFixed(2);
+        document.getElementById('totalAmount').textContent = 'Ksh ' + (cartData.total || 0).toFixed(2);
     }
     
-    // Update individual item totals
-    document.querySelectorAll('.cart-item').forEach(item => {
-        const productId = item.dataset.productId;
-        const cartItem = cartData.items.find(i => i.id == productId);
-        
-        if (cartItem) {
-            const itemTotalElement = item.querySelector('.item-total');
-            if (itemTotalElement) {
-                itemTotalElement.textContent = 'Ksh ' + cartItem.total.toFixed(2);
-            }
-            
-            const quantityInput = item.querySelector('.quantity-input');
-            if (quantityInput) {
-                quantityInput.value = cartItem.quantity;
-                quantityInput.dataset.originalQuantity = cartItem.quantity;
-            }
-        }
-    });
+    // Update individual item totals in the table
+    updateIndividualItemTotals(cartData);
     
-    // If cart is empty, reload page
+    // If cart is empty, reload page after delay
     if (cartData.count === 0) {
         setTimeout(() => {
             window.location.reload();
@@ -1028,65 +815,114 @@ function updateCartDisplay(cartData) {
     }
 }
 
-// Update entire cart
-async function updateCart() {
-    const updates = [];
-    let hasChanges = false;
-    
-    document.querySelectorAll('.cart-item').forEach(item => {
-        const productId = item.dataset.productId;
-        const quantityInput = item.querySelector('.quantity-input');
-        const currentQuantity = parseInt(quantityInput?.value) || 1;
-        const checkbox = item.querySelector('.select-item');
-        const isSelected = checkbox ? checkbox.checked : true;
-        
-        // Get original quantity from data attribute
-        const originalQuantity = parseInt(quantityInput?.dataset.originalQuantity) || currentQuantity;
-        
-        if (isSelected && currentQuantity !== originalQuantity) {
-            updates.push({
-                product_id: productId,
-                quantity: currentQuantity
-            });
-            hasChanges = true;
-        }
-    });
-    
-    if (!hasChanges) {
-        showToast('No changes to update', 'info');
+// New function to update individual item totals
+function updateIndividualItemTotals(cartData) {
+    // Only update if we have items data
+    if (!cartData.items || !Array.isArray(cartData.items)) {
+        console.log('No items data to update');
         return;
     }
     
+    console.log('Updating individual items:', cartData.items);
+    
+    // Update each item in the table
+    cartData.items.forEach(cartItem => {
+        const cartKey = cartItem.cart_key;
+        if (!cartKey) return;
+        
+        // Find the item row by cart_key
+        const itemRow = document.querySelector(`.cart-item[data-cart-key="${cartKey}"]`);
+        if (!itemRow) {
+            console.log('Item row not found for cart key:', cartKey);
+            return;
+        }
+        
+        // Ensure price is a number
+        const itemPrice = parseFloat(cartItem.price) || 0;
+        const itemTotal = parseFloat(cartItem.total) || 0;
+        const itemQuantity = parseInt(cartItem.quantity) || 1;
+        
+        // Update the item total display
+        const itemTotalElement = itemRow.querySelector('.item-total');
+        if (itemTotalElement) {
+            itemTotalElement.textContent = 'Ksh ' + itemTotal.toFixed(2);
+        }
+        
+        // Update the price display
+        const priceElement = itemRow.querySelector('.price');
+        if (priceElement) {
+            priceElement.textContent = 'Ksh ' + itemPrice.toFixed(2);
+        }
+        
+        // Update the quantity input (but only if it hasn't been manually changed)
+        const quantityInput = itemRow.querySelector('.quantity-input');
+        if (quantityInput) {
+            const currentValue = parseInt(quantityInput.value) || 1;
+            const originalValue = parseInt(quantityInput.dataset.originalQuantity) || 1;
+            
+            // Only update if the user hasn't changed it locally
+            if (currentValue === originalValue) {
+                quantityInput.value = itemQuantity;
+                quantityInput.dataset.originalQuantity = itemQuantity;
+            }
+        }
+    });
+}
+// Update cart item via AJAX
+async function updateCartItem(cartKey, quantity) {
     try {
-        const response = await fetch('<?php echo SITE_URL; ?>ajax/update-cart-bulk.php', {
+        const response = await fetch('<?php echo SITE_URL; ?>ajax/update-cart.php', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                updates: updates
+                cart_key: cartKey,
+                quantity: quantity
             })
         });
         
+        // Check if response is OK
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Server error:', errorText);
+            throw new Error(`HTTP ${response.status}: ${errorText}`);
+        }
+        
         const data = await response.json();
+        console.log('Update cart response:', data);
         
         if (data.success) {
+            // Update the specific item's total immediately
+            const itemRow = document.querySelector(`.cart-item[data-cart-key="${cartKey}"]`);
+            if (itemRow && data.cart && data.cart.items) {
+                const cartItem = data.cart.items.find(item => item.cart_key === cartKey);
+                if (cartItem) {
+                    const itemTotal = parseFloat(cartItem.total) || 0;
+                    const itemTotalElement = itemRow.querySelector('.item-total');
+                    if (itemTotalElement) {
+                        itemTotalElement.textContent = 'Ksh ' + itemTotal.toFixed(2);
+                    }
+                    
+                    // Update original quantity
+                    const quantityInput = itemRow.querySelector('.quantity-input');
+                    if (quantityInput) {
+                        quantityInput.dataset.originalQuantity = quantity;
+                    }
+                }
+            }
+            
+            // Update the full cart display
             updateCartDisplay(data.cart);
             showToast('Cart updated successfully!');
-            
-            // Update original quantity data attributes
-            document.querySelectorAll('.quantity-input').forEach(input => {
-                input.dataset.originalQuantity = input.value;
-            });
         } else {
             showToast(data.message || 'Failed to update cart', 'error');
         }
     } catch (error) {
-        console.error('Update cart bulk error:', error);
-        showToast('Something went wrong. Please try again.', 'error');
+        console.error('Update cart error:', error);
+        showToast(error.message || 'Something went wrong. Please try again.', 'error');
     }
 }
-
 // Clear cart
 async function clearCart() {
     if (!confirm('Are you sure you want to clear your entire cart? This action cannot be undone.')) {
@@ -1328,6 +1164,194 @@ function showToast(message, type = 'success') {
     
     const toast = new bootstrap.Toast(toastElement, { delay: 3000 });
     toast.show();
+}
+
+// Initialize event listeners
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize Bootstrap toasts
+    const toastEl = document.getElementById('cartToast');
+    const cartToast = toastEl ? new bootstrap.Toast(toastEl) : null;
+    
+    // Quantity controls
+    document.querySelectorAll('.decrease-qty').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            const cartKey = this.dataset.cartKey;
+            const input = document.querySelector(`.quantity-input[data-cart-key="${cartKey}"]`);
+            if (parseInt(input.value) > 1) {
+                input.value = parseInt(input.value) - 1;
+                updateCartItem(cartKey, input.value);
+            }
+        });
+    });
+    
+    document.querySelectorAll('.increase-qty').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            const cartKey = this.dataset.cartKey;
+            const input = document.querySelector(`.quantity-input[data-cart-key="${cartKey}"]`);
+            if (parseInt(input.value) < 99) {
+                input.value = parseInt(input.value) + 1;
+                updateCartItem(cartKey, input.value);
+            }
+        });
+    });
+    
+    // Quantity input change
+    document.querySelectorAll('.quantity-input').forEach(input => {
+        input.addEventListener('change', function(e) {
+            e.preventDefault();
+            const cartKey = this.dataset.cartKey;
+            const quantity = parseInt(this.value) || 1;
+            if (quantity >= 1 && quantity <= 99) {
+                updateCartItem(cartKey, quantity);
+            } else {
+                this.value = 1;
+                updateCartItem(cartKey, 1);
+            }
+        });
+    });
+    
+    // Remove item
+    document.querySelectorAll('.remove-item').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            const cartKey = this.dataset.cartKey;
+            removeCartItem(cartKey);
+        });
+    });
+    
+    // Select all checkbox
+    const selectAllCheckbox = document.getElementById('selectAll');
+    if (selectAllCheckbox) {
+        selectAllCheckbox.addEventListener('change', function() {
+            const checkboxes = document.querySelectorAll('.select-item');
+            checkboxes.forEach(cb => cb.checked = this.checked);
+            updateCheckoutButton();
+        });
+    }
+    
+    // Individual item checkbox
+    document.querySelectorAll('.select-item').forEach(cb => {
+        cb.addEventListener('change', function() {
+            // Update "Select All" checkbox state
+            const allChecked = document.querySelectorAll('.select-item:checked').length === document.querySelectorAll('.select-item').length;
+            const someChecked = document.querySelectorAll('.select-item:checked').length > 0;
+            
+            if (selectAllCheckbox) {
+                selectAllCheckbox.checked = allChecked;
+                selectAllCheckbox.indeterminate = someChecked && !allChecked;
+            }
+            
+            updateCheckoutButton();
+        });
+    });
+    
+    // Update cart button
+    const updateCartBtn = document.getElementById('updateCart');
+    if (updateCartBtn) {
+        updateCartBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            updateCart();
+        });
+    }
+    
+    // Clear cart button
+    const clearCartBtn = document.getElementById('clearCart');
+    if (clearCartBtn) {
+        clearCartBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            clearCart();
+        });
+    }
+    
+    // Calculate shipping
+    const calculateShippingBtn = document.getElementById('calculateShipping');
+    if (calculateShippingBtn) {
+        calculateShippingBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            calculateShipping();
+        });
+        
+        // Allow pressing Enter in postal code field
+        document.getElementById('postalCode')?.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                calculateShipping();
+            }
+        });
+    }
+    
+    // Apply discount
+    const applyDiscountBtn = document.getElementById('applyDiscount');
+    if (applyDiscountBtn) {
+        applyDiscountBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            applyDiscount();
+        });
+        
+        // Allow pressing Enter in discount field
+        document.getElementById('discountCode')?.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                applyDiscount();
+            }
+        });
+    }
+    
+    // Add all recommended products
+    const addAllRecommendedBtn = document.getElementById('addAllRecommended');
+    if (addAllRecommendedBtn) {
+        addAllRecommendedBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            addAllRecommended();
+        });
+    }
+    
+    // Add recommended product button
+    document.querySelectorAll('.add-recommended-btn').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            const productId = this.dataset.productId;
+            if (productId) {
+                addRecommendedProduct(productId);
+            }
+        });
+    });
+    
+    // Initialize checkout button state
+    updateCheckoutButton();
+});
+
+// Add single recommended product
+async function addRecommendedProduct(productId) {
+    try {
+        const response = await fetch('<?php echo SITE_URL; ?>ajax/add-to-cart.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                product_id: productId,
+                quantity: 1
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast('Product added to cart!');
+            if (data.cart_count !== undefined) {
+                updateCartDisplay(data.cart);
+            }
+        } else {
+            showToast(data.message || 'Failed to add product', 'error');
+        }
+    } catch (error) {
+        console.error('Add recommended product error:', error);
+        showToast('Something went wrong. Please try again.', 'error');
+    }
 }
 
 // Initialize original quantity data attributes

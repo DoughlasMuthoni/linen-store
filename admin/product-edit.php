@@ -5,10 +5,7 @@
 // 1. INCLUDES & INITIALIZATION
 // ====================================================================
 
-// Include the admin layout function FIRST
 require_once __DIR__ . '/layout.php';
-
-// Include necessary files
 require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/Database.php';
 require_once __DIR__ . '/../includes/App.php';
@@ -16,18 +13,11 @@ require_once __DIR__ . '/../includes/App.php';
 $app = new App();
 $db = $app->getDB();
 
-// Check if user is admin
 if (!$app->isLoggedIn() || !$app->isAdmin()) {
     $app->redirect('auth/login');
 }
 
-// ====================================================================
-// 2. GET PRODUCT ID & FETCH PRODUCT DATA
-// ====================================================================
-
-// Get product ID from URL
 $productId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
-
 if (!$productId) {
     $app->redirect('admin/products');
 }
@@ -48,13 +38,31 @@ if (!$product) {
     $app->redirect('admin/products');
 }
 
-// Fetch product images
-$imageStmt = $db->prepare("SELECT * FROM product_images WHERE product_id = ? ORDER BY is_primary DESC, sort_order ASC");
+// Fetch product images with variant associations
+$imageStmt = $db->prepare("
+    SELECT pi.*, 
+           pv.id as variant_id, 
+           pv.size, 
+           pv.color,
+           CONCAT(
+               COALESCE(pv.size, ''),
+               CASE WHEN pv.size IS NOT NULL AND pv.color IS NOT NULL THEN ' - ' ELSE '' END,
+               COALESCE(pv.color, '')
+           ) as variant_name
+    FROM product_images pi
+    LEFT JOIN product_variants pv ON pi.variant_id = pv.id
+    WHERE pi.product_id = ? 
+    ORDER BY pi.is_primary DESC, pi.sort_order ASC
+");
 $imageStmt->execute([$productId]);
 $productImages = $imageStmt->fetchAll();
 
 // Fetch product variants
-$variantStmt = $db->prepare("SELECT * FROM product_variants WHERE product_id = ? ORDER BY is_default DESC, size, color");
+$variantStmt = $db->prepare("
+    SELECT * FROM product_variants 
+    WHERE product_id = ? 
+    ORDER BY is_default DESC, size, color
+");
 $variantStmt->execute([$productId]);
 $variants = $variantStmt->fetchAll();
 
@@ -70,24 +78,21 @@ $categories = $db->query("
 $brands = $db->query("SELECT id, name FROM brands WHERE is_active = 1 ORDER BY name")->fetchAll();
 
 // ====================================================================
-// 3. FORM HANDLING
+// 2. FORM HANDLING
 // ====================================================================
 
 $error = '';
 $success = '';
 
-// Handle form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
-        // Verify CSRF token
         if (!$app->verifyCsrfToken()) {
             throw new Exception('Invalid form submission. Please try again.');
         }
         
-        // Get and validate data
         $productData = array_map([$app, 'sanitize'], $_POST);
         
-        // Required fields
+        // Required fields validation
         if (empty($productData['name'])) {
             throw new Exception('Product name is required');
         }
@@ -168,106 +173,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $productData['dimensions'],
             $productId
         ]);
-        // After stock update
-        if ($originalStock != $newStock) {
-            NotificationHelper::createSystemNotification(
-                $db,
-                'Manual Stock Adjustment',
-                "Product {$productName} stock changed from $originalStock to $newStock",
-                "/admin/products/edit.php?id=$productId"
-            );
-        }
-        // Handle image deletions
-        if (isset($_POST['delete_images']) && is_array($_POST['delete_images'])) {
-            foreach ($_POST['delete_images'] as $imageId) {
-                // Get image path before deletion
-                $imgStmt = $db->prepare("SELECT image_url FROM product_images WHERE id = ? AND product_id = ?");
-                $imgStmt->execute([$imageId, $productId]);
-                $image = $imgStmt->fetch();
-                
-                if ($image) {
-                    // Delete file from server
-                    $filePath = SITE_PATH . ltrim($image['image_url'], '/');
-                    if (file_exists($filePath) && !str_starts_with($image['image_url'], 'http')) {
-                        @unlink($filePath);
-                    }
-                    
-                    // Delete from database
-                    $deleteStmt = $db->prepare("DELETE FROM product_images WHERE id = ?");
-                    $deleteStmt->execute([$imageId]);
-                }
-            }
-        }
         
-        // Update image sort order and primary
-        if (isset($_POST['image_order']) && is_array($_POST['image_order'])) {
-            // First, set all images as non-primary
-            $resetPrimaryStmt = $db->prepare("UPDATE product_images SET is_primary = 0 WHERE product_id = ?");
-            $resetPrimaryStmt->execute([$productId]);
-            
-            foreach ($_POST['image_order'] as $index => $imageId) {
-                $isPrimary = isset($_POST['primary_image']) && $_POST['primary_image'] == $imageId ? 1 : 0;
-                $updateImageStmt = $db->prepare("
-                    UPDATE product_images 
-                    SET sort_order = ?, is_primary = ? 
-                    WHERE id = ? AND product_id = ?
-                ");
-                $updateImageStmt->execute([$index + 1, $isPrimary, $imageId, $productId]);
-            }
-        }
+        // ============================================
+        // FIXED: Handle variants FIRST to get their IDs
+        // ============================================
         
-        // Handle new image uploads
-        if (isset($_FILES['new_images']) && !empty($_FILES['new_images']['name'][0])) {
-            $uploadDir = SITE_PATH . 'assets/images/products/';
-            
-            // Create directory if it doesn't exist
-            if (!file_exists($uploadDir)) {
-                mkdir($uploadDir, 0755, true);
-            }
-            
-            $currentImageCount = count($productImages) - count($_POST['delete_images'] ?? []);
-            
-            for ($i = 0; $i < count($_FILES['new_images']['name']); $i++) {
-                if ($_FILES['new_images']['error'][$i] === UPLOAD_ERR_OK) {
-                    // Validate file
-                    $allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-                    $fileType = $_FILES['new_images']['type'][$i];
-                    
-                    if (!in_array($fileType, $allowedTypes)) {
-                        throw new Exception('Invalid file type. Only JPG, PNG, GIF, and WebP are allowed.');
-                    }
-                    
-                    if ($_FILES['new_images']['size'][$i] > 5 * 1024 * 1024) { // 5MB
-                        throw new Exception('File size too large. Maximum size is 5MB.');
-                    }
-                    
-                    // Generate unique filename
-                    $extension = pathinfo($_FILES['new_images']['name'][$i], PATHINFO_EXTENSION);
-                    $filename = 'product-' . $productId . '-' . uniqid() . '.' . $extension;
-                    $filePath = $uploadDir . $filename;
-                    
-                    // Move uploaded file
-                    if (move_uploaded_file($_FILES['new_images']['tmp_name'][$i], $filePath)) {
-                        // Insert into database
-                        $isPrimary = ($currentImageCount === 0 && $i === 0) ? 1 : 0;
-                        $imageStmt = $db->prepare("
-                            INSERT INTO product_images (product_id, image_url, is_primary, sort_order)
-                            VALUES (?, ?, ?, ?)
-                        ");
-                        $imageUrl = 'assets/images/products/' . $filename;
-                        $sortOrder = $currentImageCount + $i + 1;
-                        $imageStmt->execute([$productId, $imageUrl, $isPrimary, $sortOrder]);
-                    } else {
-                        throw new Exception('Failed to upload image: ' . $_FILES['new_images']['name'][$i]);
-                    }
-                }
-            }
-        }
+        // Temporarily disable foreign key checks
+        $db->exec("SET FOREIGN_KEY_CHECKS=0");
         
-        // Handle variants
-        // First, delete all existing variants (we'll recreate them)
+        // First, delete all existing variants
         $deleteVariantsStmt = $db->prepare("DELETE FROM product_variants WHERE product_id = ?");
         $deleteVariantsStmt->execute([$productId]);
+        
+        $newVariants = []; // Store new variant IDs by their form index
         
         // Then insert new variants
         if (isset($_POST['variants']) && is_array($_POST['variants'])) {
@@ -305,6 +223,135 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $stockQuantity,
                         $isDefault
                     ]);
+                    
+                    // Store the new variant ID with its form index
+                    $newVariants[$index] = $db->lastInsertId();
+                }
+            }
+        }
+        
+        // Re-enable foreign key checks
+        $db->exec("SET FOREIGN_KEY_CHECKS=1");
+        
+        // ============================================
+        // Handle image deletions
+        // ============================================
+        if (isset($_POST['delete_images']) && is_array($_POST['delete_images'])) {
+            foreach ($_POST['delete_images'] as $imageId) {
+                // Get image path before deletion
+                $imgStmt = $db->prepare("SELECT image_url FROM product_images WHERE id = ? AND product_id = ?");
+                $imgStmt->execute([$imageId, $productId]);
+                $image = $imgStmt->fetch();
+                
+                if ($image) {
+                    // Delete file from server
+                    $filePath = SITE_PATH . ltrim($image['image_url'], '/');
+                    if (file_exists($filePath) && !str_starts_with($image['image_url'], 'http')) {
+                        @unlink($filePath);
+                    }
+                    
+                    // Delete from database
+                    $deleteStmt = $db->prepare("DELETE FROM product_images WHERE id = ?");
+                    $deleteStmt->execute([$imageId]);
+                }
+            }
+        }
+        
+        // ============================================
+        // FIXED: Update existing images variant associations
+        // Now using the new variant IDs from $newVariants array
+        // ============================================
+        if (isset($_POST['image_variants']) && is_array($_POST['image_variants'])) {
+            foreach ($_POST['image_variants'] as $imageId => $variantIndex) {
+                // variantIndex is the form index (0, 1, 2, etc.)
+                // Convert it to actual variant ID using $newVariants array
+                $variantId = null;
+                if ($variantIndex !== '' && isset($newVariants[$variantIndex])) {
+                    $variantId = $newVariants[$variantIndex];
+                }
+                
+                $updateStmt = $db->prepare("
+                    UPDATE product_images 
+                    SET variant_id = ? 
+                    WHERE id = ? AND product_id = ?
+                ");
+                $updateStmt->execute([$variantId, $imageId, $productId]);
+            }
+        }
+        
+        // ============================================
+        // Update image sort order and primary
+        // ============================================
+        if (isset($_POST['image_order']) && is_array($_POST['image_order'])) {
+            // First, set all images as non-primary
+            $resetPrimaryStmt = $db->prepare("UPDATE product_images SET is_primary = 0 WHERE product_id = ?");
+            $resetPrimaryStmt->execute([$productId]);
+            
+            foreach ($_POST['image_order'] as $index => $imageId) {
+                $isPrimary = isset($_POST['primary_image']) && $_POST['primary_image'] == $imageId ? 1 : 0;
+                $updateImageStmt = $db->prepare("
+                    UPDATE product_images 
+                    SET sort_order = ?, is_primary = ? 
+                    WHERE id = ? AND product_id = ?
+                ");
+                $updateImageStmt->execute([$index + 1, $isPrimary, $imageId, $productId]);
+            }
+        }
+        
+        // ============================================
+        // FIXED: Handle new image uploads with proper variant associations
+        // ============================================
+        if (isset($_FILES['new_images']) && !empty($_FILES['new_images']['name'][0])) {
+            $uploadDir = SITE_PATH . 'assets/images/products/';
+            
+            // Create directory if it doesn't exist
+            if (!file_exists($uploadDir)) {
+                mkdir($uploadDir, 0755, true);
+            }
+            
+            $currentImageCount = count($productImages) - count($_POST['delete_images'] ?? []);
+            
+            for ($i = 0; $i < count($_FILES['new_images']['name']); $i++) {
+                if ($_FILES['new_images']['error'][$i] === UPLOAD_ERR_OK) {
+                    // Validate file
+                    $allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+                    $fileType = $_FILES['new_images']['type'][$i];
+                    
+                    if (!in_array($fileType, $allowedTypes)) {
+                        throw new Exception('Invalid file type. Only JPG, PNG, GIF, and WebP are allowed.');
+                    }
+                    
+                    if ($_FILES['new_images']['size'][$i] > 5 * 1024 * 1024) {
+                        throw new Exception('File size too large. Maximum size is 5MB.');
+                    }
+                    
+                    // Generate unique filename
+                    $extension = pathinfo($_FILES['new_images']['name'][$i], PATHINFO_EXTENSION);
+                    $filename = 'product-' . $productId . '-' . uniqid() . '.' . $extension;
+                    $filePath = $uploadDir . $filename;
+                    
+                    // Move uploaded file
+                    if (move_uploaded_file($_FILES['new_images']['tmp_name'][$i], $filePath)) {
+                        // Get variant ID for this image (variantIndex is the form index)
+                        $variantId = null;
+                        if (isset($_POST['new_image_variants'][$i]) && $_POST['new_image_variants'][$i] !== '') {
+                            $variantIndex = $_POST['new_image_variants'][$i];
+                            if (isset($newVariants[$variantIndex])) {
+                                $variantId = $newVariants[$variantIndex];
+                            }
+                        }
+                        
+                        $isPrimary = ($currentImageCount === 0 && $i === 0) ? 1 : 0;
+                        $imageStmt = $db->prepare("
+                            INSERT INTO product_images (product_id, variant_id, image_url, is_primary, sort_order)
+                            VALUES (?, ?, ?, ?, ?)
+                        ");
+                        $imageUrl = 'assets/images/products/' . $filename;
+                        $sortOrder = $currentImageCount + $i + 1;
+                        $imageStmt->execute([$productId, $variantId, $imageUrl, $isPrimary, $sortOrder]);
+                    } else {
+                        throw new Exception('Failed to upload image: ' . $_FILES['new_images']['name'][$i]);
+                    }
                 }
             }
         }
@@ -326,7 +373,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // ====================================================================
-// 4. BUILD CONTENT
+// 3. BUILD CONTENT
 // ====================================================================
 
 $content = '
@@ -499,47 +546,85 @@ $content .= '
                     </div>
                 </div>
                 
-                <!-- Images Card -->
+                <!-- UPDATED: Images Card with Variant Association -->
                 <div class="card shadow mb-4">
                     <div class="card-header py-3 d-flex justify-content-between align-items-center">
                         <h6 class="m-0 font-weight-bold text-primary">Product Images</h6>
-                        <small class="text-muted">Drag to reorder</small>
+                        <small class="text-muted">Drag to reorder, select variant for each image</small>
                     </div>
                     <div class="card-body">
-                        <!-- Existing Images -->
+                        <!-- Existing Images with Variant Selector -->
                         <div id="existingImages" class="row g-2 mb-4">';
 if (count($productImages) > 0) {
     foreach ($productImages as $index => $image) {
         $isPrimary = $image['is_primary'] ? 'checked' : '';
+        $variantName = $image['variant_name'] ? htmlspecialchars($image['variant_name']) : 'All Variants';
+        
         $content .= '
-                            <div class="col-md-3 image-item" data-id="' . $image['id'] . '">
-                                <div class="card">
+                            <div class="col-md-4 image-item" data-id="' . $image['id'] . '">
+                                <div class="card h-100">
                                     <img src="' . SITE_URL . $image['image_url'] . '" 
                                          class="card-img-top" 
-                                         style="height: 150px; object-fit: cover;">
+                                         style="height: 150px; object-fit: cover;"
+                                         onerror="this.onerror=null; this.src=\'' . SITE_URL . 'assets/images/placeholder.jpg\';">
                                     <div class="card-body p-2">
-                                        <div class="form-check">
-                                            <input class="form-check-input primary-image-radio" 
-                                                   type="radio" 
-                                                   name="primary_image" 
-                                                   value="' . $image['id'] . '" 
-                                                   id="primary_' . $image['id'] . '"
-                                                   ' . $isPrimary . '>
-                                            <label class="form-check-label" for="primary_' . $image['id'] . '">
-                                                Primary
-                                            </label>
+                                        <!-- Variant Association Dropdown -->
+                                        <div class="mb-2">
+                                            <label class="form-label small">Associate with Variant:</label>
+                                            <select class="form-control form-control-sm image-variant-select" 
+                                                    name="image_variants[' . $image['id'] . ']">
+                                                <option value="">All Variants (Default)</option>';
+        // We need to find which variant index matches this image's variant_id
+        $selectedVariantIndex = '';
+        foreach ($variants as $variantIndex => $variant) {
+            $variantLabel = '';
+            if ($variant['size']) $variantLabel .= $variant['size'];
+            if ($variant['size'] && $variant['color']) $variantLabel .= ' - ';
+            if ($variant['color']) $variantLabel .= $variant['color'];
+            if (!$variantLabel) $variantLabel = 'Default Variant';
+            
+            // Check if this variant matches the image's variant_id
+            if ($image['variant_id'] == $variant['id']) {
+                $selectedVariantIndex = $variantIndex;
+                $selected = 'selected';
+            } else {
+                $selected = '';
+            }
+            
+            $content .= '<option value="' . $variantIndex . '" ' . $selected . '>' . htmlspecialchars($variantLabel) . '</option>';
+        }
+        $content .= '
+                                            </select>
                                         </div>
-                                        <div class="form-check">
-                                            <input class="form-check-input delete-image-checkbox" 
-                                                   type="checkbox" 
-                                                   name="delete_images[]" 
-                                                   value="' . $image['id'] . '" 
-                                                   id="delete_' . $image['id'] . '">
-                                            <label class="form-check-label text-danger" for="delete_' . $image['id'] . '">
-                                                Delete
-                                            </label>
+                                        
+                                        <!-- Primary and Delete Options -->
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <div class="form-check form-check-inline">
+                                                <input class="form-check-input primary-image-radio" 
+                                                       type="radio" 
+                                                       name="primary_image" 
+                                                       value="' . $image['id'] . '" 
+                                                       id="primary_' . $image['id'] . '"
+                                                       ' . $isPrimary . '>
+                                                <label class="form-check-label small" for="primary_' . $image['id'] . '">
+                                                    Primary
+                                                </label>
+                                            </div>
+                                            <div class="form-check form-check-inline">
+                                                <input class="form-check-input delete-image-checkbox" 
+                                                       type="checkbox" 
+                                                       name="delete_images[]" 
+                                                       value="' . $image['id'] . '" 
+                                                       id="delete_' . $image['id'] . '">
+                                                <label class="form-check-label small text-danger" for="delete_' . $image['id'] . '">
+                                                    Delete
+                                                </label>
+                                            </div>
                                         </div>
                                         <input type="hidden" name="image_order[]" value="' . $image['id'] . '">
+                                        <small class="text-muted d-block mt-1">
+                                            ' . $variantName . '
+                                        </small>
                                     </div>
                                 </div>
                             </div>';
@@ -554,21 +639,51 @@ if (count($productImages) > 0) {
 $content .= '
                         </div>
                         
-                        <!-- New Images Upload -->
-                        <div class="mb-3">
-                            <label for="new_images" class="form-label">Add More Images</label>
-                            <input class="form-control" 
-                                   type="file" 
-                                   id="new_images" 
-                                   name="new_images[]" 
-                                   multiple 
-                                   accept="image/*">
-                            <small class="text-muted">Upload additional images (JPG, PNG, GIF, WebP). Max 5MB each.</small>
-                        </div>
-                        
-                        <div id="newImagePreview" class="row g-2 mt-3">
-                            <!-- New image previews will appear here -->
-                        </div>
+                       <!-- In the new image upload section -->
+<div class="mb-4">
+    <h6 class="fw-bold mb-3">Add More Images</h6>
+    <div id="newImagesContainer">
+        <div class="new-image-item mb-3">
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Image File *</label>
+                    <input class="form-control" 
+                           type="file" 
+                           name="new_images[]" 
+                           accept="image/*" 
+                           required>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Variant (Optional)</label>
+                    <select class="form-control new-image-variant" 
+                            name="new_image_variants[]">
+                        <option value="">All Variants (Default)</option>';
+foreach ($variants as $index => $variant) {
+    $variantLabel = '';
+    if ($variant['size']) $variantLabel .= $variant['size'];
+    if ($variant['size'] && $variant['color']) $variantLabel .= ' - ';
+    if ($variant['color']) $variantLabel .= $variant['color'];
+    if (!$variantLabel) $variantLabel = 'Default Variant';
+    
+    $content .= '<option value="' . $index . '">' . htmlspecialchars($variantLabel) . '</option>';
+}
+$content .= '
+                    </select>
+                </div>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-danger mt-2" onclick="removeNewImageField(this)">
+                <i class="fas fa-times me-1"></i> Remove
+            </button>
+            <div class="image-preview mt-2"></div>
+        </div>
+    </div>
+    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addNewImageField()">
+        <i class="fas fa-plus me-1"></i> Add Another Image
+    </button>
+    <small class="text-muted d-block mt-2">
+        You can associate images with specific variants. Images without variant association will show for all variants.
+    </small>
+</div>
                     </div>
                 </div>
                 
@@ -925,8 +1040,39 @@ $content .= '
     </div>
 </div>
 
+
+<!-- New Image Field Template -->
+<div id="newImageFieldTemplate" class="d-none">
+    <div class="new-image-item mb-3">
+        <div class="row g-3">
+            <div class="col-md-6">
+                <label class="form-label">Image File *</label>
+                <input class="form-control" 
+                       type="file" 
+                       name="new_images[]" 
+                       accept="image/*" 
+                       required>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Variant (Optional)</label>
+                <select class="form-control new-image-variant" 
+                        name="new_image_variants[]">
+                    <option value="">All Variants (Default)</option>';
+// Variant options will be populated dynamically in JavaScript
+$content .= '
+                </select>
+            </div>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-danger mt-2" onclick="removeNewImageField(this)">
+            <i class="fas fa-times me-1"></i> Remove
+        </button>
+        <div class="image-preview mt-2"></div>
+    </div>
+</div>
+
 <script>
 let variantCount = ' . count($variants) . ';
+let newImageCount = 0;
 
 // Initialize Sortable for image reordering
 $(document).ready(function() {
@@ -936,57 +1082,101 @@ $(document).ready(function() {
         width: "100%"
     });
     
-    // Make images sortable (using Sortable.js - include the library in layout.php)
+    // Make images sortable
     if (typeof Sortable !== "undefined" && document.getElementById("existingImages")) {
         new Sortable(document.getElementById("existingImages"), {
             handle: ".card-img-top",
             animation: 150,
             onUpdate: function() {
-                // Update hidden inputs with new order
                 $("#existingImages .image-item").each(function(index) {
                     $(this).find("input[name=\'image_order[]\']").val($(this).data("id"));
                 });
             }
         });
     }
-});
-
-// Image preview for new images
-const newImagesInput = document.getElementById("new_images");
-if (newImagesInput) {
-    newImagesInput.addEventListener("change", function(e) {
-        const preview = document.getElementById("newImagePreview");
-        if (preview) {
-            preview.innerHTML = "";
-            
-            for (let i = 0; i < this.files.length; i++) {
-                const file = this.files[i];
+    
+    // Preview for new images
+    document.addEventListener("change", function(e) {
+        if (e.target && e.target.type === "file" && e.target.name === "new_images[]") {
+            const file = e.target.files[0];
+            if (file) {
                 const reader = new FileReader();
+                const container = e.target.closest(".new-image-item");
+                const previewContainer = container.querySelector(".image-preview");
                 
-                reader.onload = function(e) {
-                    const col = document.createElement("div");
-                    col.className = "col-md-3 mb-2";
-                    col.innerHTML = `
-                        <div class="card">
-                            <img src="${e.target.result}" 
-                                 class="card-img-top" 
-                                 style="height: 150px; object-fit: cover;">
-                            <div class="card-body p-2">
-                                <small class="d-block text-truncate">${file.name}</small>
-                                <small class="text-muted">${(file.size / 1024).toFixed(1)} KB</small>
+                reader.onload = function(event) {
+                    previewContainer.innerHTML = `
+                        <div class="col-md-4">
+                            <div class="card">
+                                <img src="${event.target.result}" 
+                                     class="card-img-top" 
+                                     style="height: 100px; object-fit: cover;">
+                                <div class="card-body p-2">
+                                    <small class="d-block text-truncate">${file.name}</small>
+                                    <small class="text-muted">${(file.size / 1024).toFixed(1)} KB</small>
+                                </div>
                             </div>
                         </div>
                     `;
-                    preview.appendChild(col);
-                }
+                };
                 
                 reader.readAsDataURL(file);
             }
         }
     });
+});
+
+// Add new image field
+function addNewImageField() {
+    const container = document.getElementById("newImagesContainer");
+    const template = document.getElementById("newImageFieldTemplate").innerHTML;
+    
+    // Get current variants for dropdown
+    const variants = getCurrentVariants();
+    let variantOptions = \'<option value="">All Variants (Default)</option>\';
+    variants.forEach(variant => {
+        variantOptions += `<option value="${variant.id}">${variant.label}</option>`;
+    });
+    
+    newImageCount++;
+    const fieldHtml = template.replace(\'<option value="">All Variants (Default)</option>\', variantOptions);
+    
+    container.insertAdjacentHTML("beforeend", fieldHtml);
 }
 
-// Variant management
+// Remove new image field
+function removeNewImageField(button) {
+    const item = button.closest(".new-image-item");
+    if (item) {
+        item.remove();
+    }
+}
+
+// Get current variants from form
+function getCurrentVariants() {
+    const variants = [];
+    document.querySelectorAll(".variant-item").forEach((item, index) => {
+        const size = item.querySelector(".variant-size")?.value || "";
+        const color = item.querySelector(".variant-color")?.value || "";
+        const variantId = index; // Use index as temporary ID
+        
+        if (size || color) {
+            let label = "";
+            if (size) label += size;
+            if (size && color) label += " - ";
+            if (color) label += color;
+            if (!label) label = "Default Variant";
+            
+            variants.push({
+                id: variantId,
+                label: label
+            });
+        }
+    });
+    return variants;
+}
+
+// Add variant function
 function addVariant() {
     const container = document.getElementById("variantsContainer");
     const template = document.getElementById("variantTemplate").innerHTML;
@@ -1016,14 +1206,17 @@ function addVariant() {
     }
     
     container.appendChild(div.firstElementChild);
+    
+    // Update variant dropdowns in image sections
+    updateVariantDropdowns();
 }
 
+// Remove variant
 function removeVariant(button) {
     const variantItem = button.closest(".variant-item");
     if (variantItem) {
         variantItem.remove();
         
-        // Show message if no variants left
         const container = document.getElementById("variantsContainer");
         if (container && container.children.length === 0) {
             container.innerHTML = `
@@ -1033,11 +1226,63 @@ function removeVariant(button) {
                 </div>
             `;
         }
+        
+        // Update variant dropdowns
+        updateVariantDropdowns();
     }
 }
 
+// Update all variant dropdowns when variants change
+function updateVariantDropdowns() {
+    const variants = getCurrentVariants();
+    
+    // Update existing image variant selects
+    document.querySelectorAll(".image-variant-select").forEach(select => {
+        const currentValue = select.value;
+        select.innerHTML = \'<option value="">All Variants (Default)</option>\';
+        
+        variants.forEach(variant => {
+            const option = document.createElement("option");
+            option.value = variant.id;
+            option.textContent = variant.label;
+            if (currentValue == variant.id) {
+                option.selected = true;
+            }
+            select.appendChild(option);
+        });
+    });
+    
+    // Update new image variant selects
+    document.querySelectorAll(".new-image-variant").forEach(select => {
+        const currentValue = select.value;
+        select.innerHTML = \'<option value="">All Variants (Default)</option>\';
+        
+        variants.forEach(variant => {
+            const option = document.createElement("option");
+            option.value = variant.id;
+            option.textContent = variant.label;
+            if (currentValue == variant.id) {
+                option.selected = true;
+            }
+            select.appendChild(option);
+        });
+    });
+}
+
+// Only allow one default variant
+document.addEventListener("change", function(e) {
+    if (e.target.classList.contains("variant-default") && e.target.checked) {
+        document.querySelectorAll(".variant-default").forEach(function(checkbox) {
+            if (checkbox !== e.target) {
+                checkbox.checked = false;
+            }
+        });
+    }
+});
+
+// Update color code
 function updateColorCode(colorPicker) {
-    const hex = colorPicker.value.substring(1); // Remove #
+    const hex = colorPicker.value.substring(1);
     const input = colorPicker.previousElementSibling;
     if (input) {
         input.value = hex.toUpperCase();
@@ -1061,17 +1306,6 @@ document.addEventListener("input", function(e) {
                 skuInput.value = sku;
             }
         }
-    }
-});
-
-// Only allow one default variant
-document.addEventListener("change", function(e) {
-    if (e.target.classList.contains("variant-default") && e.target.checked) {
-        document.querySelectorAll(".variant-default").forEach(function(checkbox) {
-            if (checkbox !== e.target) {
-                checkbox.checked = false;
-            }
-        });
     }
 });
 
@@ -1128,7 +1362,7 @@ document.querySelectorAll(".confirm-delete").forEach(function(link) {
 </script>';
 
 // ====================================================================
-// 5. OUTPUT THE LAYOUT
+// 4. OUTPUT THE LAYOUT
 // ====================================================================
 
 echo adminLayout($content, 'Edit Product: ' . htmlspecialchars($product['name']));

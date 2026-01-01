@@ -134,376 +134,30 @@ require_once 'includes/header.php';
 ?>
 
 <!-- Hero Section with Slider -->
-<section class="hero-section position-relative overflow-hidden">
-    <div class="container-fluid p-0">
-        <div id="heroCarousel" class="carousel slide" data-bs-ride="carousel">
-            <div class="carousel-indicators">
-                <button type="button" data-bs-target="#heroCarousel" data-bs-slide-to="0" class="active"></button>
-                <button type="button" data-bs-target="#heroCarousel" data-bs-slide-to="1"></button>
-                <button type="button" data-bs-target="#heroCarousel" data-bs-slide-to="2"></button>
-            </div>
-            <div class="carousel-inner">
-                <!-- Slide 1: New Arrivals -->
-                <div class="carousel-item active">
-                    <div class="row g-0 align-items-center">
-                        <div class="col-lg-6 bg-light d-flex align-items-center py-5 py-lg-0" style="min-height: 80vh;">
-                            <div class="hero-content p-5 p-lg-7">
-                                <span class="badge bg-dark text-light mb-3 px-3 py-2 rounded-pill">New Collection</span>
-                                <h1 class="display-3 fw-bold mb-4">Timeless Style.<br>Pure Linen.</h1>
-                                <p class="lead mb-5">Discover our premium collection of linen clothing, crafted for comfort and elegance that lasts.</p>
-                                <div class="d-flex flex-wrap gap-3">
-                                    <a href="<?php echo SITE_URL; ?>products?sort=newest" class="btn btn-dark btn-lg px-5 py-3">
-                                        <i class="fas fa-shopping-bag me-2"></i>Shop New Arrivals
-                                    </a>
-                                    <a href="<?php echo SITE_URL; ?>products" class="btn btn-outline-dark btn-lg px-5 py-3">
-                                        <i class="fas fa-store me-2"></i>View All
-                                    </a>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-lg-6 p-0">
-                            <div class="hero-products-grid" style="height: 80vh;">
-                                <div class="row g-0 h-100">
-                                    <?php 
-                                    // Fetch 2 new arrival products for slide 1
-                                    $heroNewArrivals = array_slice($newArrivals, 0, 2);
-                                    foreach($heroNewArrivals as $product): 
-                                        $stockStatus = getStockStatus($product['total_variant_stock'] ?? $product['stock_quantity'] ?? 0);
-                                        $hasVariants = !empty($product['variant_min_price']) && !empty($product['variant_max_price']);
-                                        $priceDisplay = $hasVariants && $product['variant_min_price'] != $product['variant_max_price'] 
-                                            ? formatPrice($product['variant_min_price']) . " - " . formatPrice($product['variant_max_price'])
-                                            : formatPrice($product['display_price'] ?? $product['price']);
-                                    ?>
-                                    <div class="col-12 position-relative h-50">
-                                        <div class="hero-product-background h-100 position-relative overflow-hidden">
-                                            <!-- Background Image -->
-                                            <img src="<?php echo $product['primary_image'] ? SITE_URL . $product['primary_image'] : SITE_URL . 'assets/images/placeholder.jpg'; ?>" 
-                                                 alt="<?php echo htmlspecialchars($product['name']); ?>" 
-                                                 class="w-100 h-100 object-fit-cover hero-bg-image">
-                                            
-                                            <!-- Product Overlay -->
-                                            <div class="hero-product-overlay position-absolute top-0 start-0 w-100 h-100 d-flex flex-column justify-content-end p-4">
-                                                <div class="text-light">
-                                                    <h5 class="fw-bold mb-1 text-truncate"><?php echo htmlspecialchars($product['name']); ?></h5>
-                                                    <div class="d-flex justify-content-between align-items-center">
-                                                        <span class="fw-bold"><?php echo $priceDisplay; ?></span>
-                                                        <div>
-                                                            <?php if (strtotime($product['created_at']) > strtotime('-7 days')): ?>
-                                                                <span class="badge bg-success me-1">New</span>
-                                                            <?php endif; ?>
-                                                            <span class="badge bg-<?php echo $stockStatus['class']; ?>">
-                                                                <i class="fas fa-<?php echo $stockStatus['text'] === 'Out of Stock' ? 'times' : 'check'; ?>"></i>
-                                                            </span>
-                                                        </div>
-                                                    </div>
-                                                    <a href="<?php echo SITE_URL; ?>products/detail.php?slug=<?php echo $product['slug']; ?>" 
-                                                       class="btn btn-sm btn-light mt-2 w-100">
-                                                        View Product
-                                                    </a>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <?php endforeach; ?>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Slide 2: Summer Sale -->
-                <div class="carousel-item">
-                    <div class="row g-0 align-items-center">
-                        <div class="col-lg-6 order-lg-2 bg-light d-flex align-items-center py-5 py-lg-0" style="min-height: 80vh;">
-                            <div class="hero-content p-5 p-lg-7">
-                                <span class="badge bg-danger text-light mb-3 px-3 py-2 rounded-pill">Summer Sale</span>
-                                <h1 class="display-3 fw-bold mb-4">Summer Sale<br>Up to 50% Off</h1>
-                                <p class="lead mb-5">Refresh your wardrobe with our premium linen collection at amazing prices.</p>
-                                <div class="d-flex flex-wrap gap-3">
-                                    <a href="<?php echo SITE_URL; ?>products?filter=on_sale" class="btn btn-danger btn-lg px-5 py-3">
-                                        <i class="fas fa-fire me-2"></i>Shop Sale
-                                    </a>
-                                    <div class="mt-3">
-                                        <small class="text-uppercase text-muted d-block mb-1">Limited Time Offer</small>
-                                        <div class="countdown-timer d-flex gap-2" id="heroCountdown"></div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-lg-6 order-lg-1 p-0">
-                            <div class="hero-products-grid" style="height: 80vh;">
-                                <div class="row g-0 h-100">
-                                    <?php 
-                                    // Fetch 2 sale products for slide 2
-                                    $heroSaleProducts = array_slice($saleProducts, 0, 2);
-                                    foreach($heroSaleProducts as $product): 
-                                        $stockStatus = getStockStatus($product['total_variant_stock'] ?? $product['stock_quantity'] ?? 0);
-                                        $hasVariants = !empty($product['variant_min_price']) && !empty($product['variant_max_price']);
-                                        $priceDisplay = $hasVariants && $product['variant_min_price'] != $product['variant_max_price'] 
-                                            ? formatPrice($product['variant_min_price']) . " - " . formatPrice($product['variant_max_price'])
-                                            : formatPrice($product['display_price'] ?? $product['price']);
-                                        $discountPercent = isset($product['compare_price']) && $product['compare_price'] > $product['price']
-                                            ? round((($product['compare_price'] - $product['price']) / $product['compare_price']) * 100)
-                                            : 0;
-                                    ?>
-                                    <div class="col-12 position-relative h-50">
-                                        <div class="hero-product-background h-100 position-relative overflow-hidden">
-                                            <!-- Background Image -->
-                                            <img src="<?php echo $product['primary_image'] ? SITE_URL . $product['primary_image'] : SITE_URL . 'assets/images/placeholder.jpg'; ?>" 
-                                                 alt="<?php echo htmlspecialchars($product['name']); ?>" 
-                                                 class="w-100 h-100 object-fit-cover hero-bg-image">
-                                            
-                                            <!-- Product Overlay -->
-                                            <div class="hero-product-overlay position-absolute top-0 start-0 w-100 h-100 d-flex flex-column justify-content-end p-4">
-                                                <div class="text-light">
-                                                    <?php if ($discountPercent > 0): ?>
-                                                        <span class="badge bg-danger mb-2">-<?php echo $discountPercent; ?>% OFF</span>
-                                                    <?php endif; ?>
-                                                    <h5 class="fw-bold mb-1 text-truncate"><?php echo htmlspecialchars($product['name']); ?></h5>
-                                                    <div class="d-flex justify-content-between align-items-center">
-                                                        <div>
-                                                            <span class="fw-bold"><?php echo $priceDisplay; ?></span>
-                                                            <?php if (isset($product['compare_price']) && $product['compare_price'] > $product['price']): ?>
-                                                                <small class="text-light text-decoration-line-through d-block">
-                                                                    <?php echo formatPrice($product['compare_price']); ?>
-                                                                </small>
-                                                            <?php endif; ?>
-                                                        </div>
-                                                        <span class="badge bg-<?php echo $stockStatus['class']; ?>">
-                                                            <i class="fas fa-<?php echo $stockStatus['text'] === 'Out of Stock' ? 'times' : 'check'; ?>"></i>
-                                                        </span>
-                                                    </div>
-                                                    <a href="<?php echo SITE_URL; ?>products/detail.php?slug=<?php echo $product['slug']; ?>" 
-                                                       class="btn btn-sm btn-light mt-2 w-100">
-                                                        View Product
-                                                    </a>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <?php endforeach; ?>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Slide 3: Best Sellers -->
-                <div class="carousel-item">
-                    <div class="row g-0 align-items-center">
-                        <div class="col-lg-6 bg-light d-flex align-items-center py-5 py-lg-0" style="min-height: 80vh;">
-                            <div class="hero-content p-5 p-lg-7">
-                                <span class="badge bg-success text-light mb-3 px-3 py-2 rounded-pill">Best Sellers</span>
-                                <h1 class="display-3 fw-bold mb-4">Best Sellers<br>Most Loved Items</h1>
-                                <p class="lead mb-5">Join thousands of satisfied customers who love our premium linen products.</p>
-                                <div class="d-flex flex-wrap gap-3">
-                                    <a href="<?php echo SITE_URL; ?>products?sort=best_selling" class="btn btn-success btn-lg px-5 py-3">
-                                        <i class="fas fa-star me-2"></i>View Best Sellers
-                                    </a>
-                                    <a href="<?php echo SITE_URL; ?>products?sort=popular" class="btn btn-outline-success btn-lg px-5 py-3">
-                                        <i class="fas fa-chart-line me-2"></i>Most Popular
-                                    </a>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-lg-6 p-0">
-                            <div class="hero-products-grid" style="height: 80vh;">
-                                <div class="row g-0 h-100">
-                                    <?php 
-                                    // Fetch 2 best seller products for slide 3
-                                    $heroBestSellers = array_slice($bestSellers, 0, 2);
-                                    foreach($heroBestSellers as $product): 
-                                        $stockStatus = getStockStatus($product['total_variant_stock'] ?? $product['stock_quantity'] ?? 0);
-                                        $hasVariants = !empty($product['variant_min_price']) && !empty($product['variant_max_price']);
-                                        $priceDisplay = $hasVariants && $product['variant_min_price'] != $product['variant_max_price'] 
-                                            ? formatPrice($product['variant_min_price']) . " - " . formatPrice($product['variant_max_price'])
-                                            : formatPrice($product['display_price'] ?? $product['price']);
-                                    ?>
-                                    <div class="col-12 position-relative h-50">
-                                        <div class="hero-product-background h-100 position-relative overflow-hidden">
-                                            <!-- Background Image -->
-                                            <img src="<?php echo $product['primary_image'] ? SITE_URL . $product['primary_image'] : SITE_URL . 'assets/images/placeholder.jpg'; ?>" 
-                                                 alt="<?php echo htmlspecialchars($product['name']); ?>" 
-                                                 class="w-100 h-100 object-fit-cover hero-bg-image">
-                                            
-                                            <!-- Product Overlay -->
-                                            <div class="hero-product-overlay position-absolute top-0 start-0 w-100 h-100 d-flex flex-column justify-content-end p-4">
-                                                <div class="text-light">
-                                                    <span class="badge bg-warning text-dark mb-2">
-                                                        <i class="fas fa-fire me-1"></i> Bestseller
-                                                    </span>
-                                                    <h5 class="fw-bold mb-1 text-truncate"><?php echo htmlspecialchars($product['name']); ?></h5>
-                                                    <div class="d-flex justify-content-between align-items-center">
-                                                        <span class="fw-bold"><?php echo $priceDisplay; ?></span>
-                                                        <span class="badge bg-<?php echo $stockStatus['class']; ?>">
-                                                            <i class="fas fa-<?php echo $stockStatus['text'] === 'Out of Stock' ? 'times' : 'check'; ?>"></i>
-                                                        </span>
-                                                    </div>
-                                                    <a href="<?php echo SITE_URL; ?>products/detail.php?slug=<?php echo $product['slug']; ?>" 
-                                                       class="btn btn-sm btn-light mt-2 w-100">
-                                                        View Product
-                                                    </a>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <?php endforeach; ?>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+<div class="hero-banner bg-gradient-primary text-white py-5 mb-5">
+    <div class="container">
+        <div class="row align-items-center">
+            <div class="col-lg-6">
+                <h1 class="display-4 fw-bold mb-3">Premium Linen Collection</h1>
+                <p class="lead mb-4">Discover comfort and elegance in every thread. Shop our curated collection of premium linens.</p>
+                <div class="d-flex flex-wrap gap-2">
+                    <a href="#new-arrivals" class="btn btn-light btn-lg px-4">
+                        <i class="fas fa-star me-2"></i>Shop New Arrivals
+                    </a>
+                    <a href="#categories" class="btn btn-outline-light btn-lg px-4">
+                        <i class="fas fa-list me-2"></i>Browse Categories
+                    </a>
                 </div>
             </div>
-            
-            <!-- Carousel Controls -->
-            <button class="carousel-control-prev" type="button" data-bs-target="#heroCarousel" data-bs-slide="prev">
-                <span class="carousel-control-prev-icon" aria-hidden="true"></span>
-                <span class="visually-hidden">Previous</span>
-            </button>
-            <button class="carousel-control-next" type="button" data-bs-target="#heroCarousel" data-bs-slide="next">
-                <span class="carousel-control-next-icon" aria-hidden="true"></span>
-                <span class="visually-hidden">Next</span>
-            </button>
+            <div class="col-lg-6">
+                <div class="text-center">
+                    <i class="fas fa-couch fa-10x opacity-25"></i>
+                </div>
+            </div>
         </div>
     </div>
-</section>
+</div>
 
-<style>
-/* Hero Products Grid Styles */
-.hero-products-grid {
-    position: relative;
-}
-
-.hero-product-background {
-    background: linear-gradient(135deg, #2c3e50 0%, #4a6491 100%);
-}
-
-.hero-bg-image {
-    transition: transform 0.8s ease;
-}
-
-.hero-product-background:hover .hero-bg-image {
-    transform: scale(1.1);
-}
-
-.hero-product-overlay {
-    background: linear-gradient(transparent, rgba(0,0,0,0.8));
-    opacity: 0;
-    transition: opacity 0.3s ease;
-}
-
-.hero-product-background:hover .hero-product-overlay {
-    opacity: 1;
-}
-
-/* Text styling for overlays */
-.hero-product-overlay h5 {
-    font-size: 1.2rem;
-    line-height: 1.3;
-    text-shadow: 1px 1px 3px rgba(0,0,0,0.5);
-}
-
-.hero-product-overlay .fw-bold {
-    font-size: 1.3rem;
-    text-shadow: 1px 1px 3px rgba(0,0,0,0.5);
-}
-
-.hero-product-overlay .badge {
-    font-size: 0.85rem;
-    padding: 0.4rem 0.8rem;
-}
-
-.hero-product-overlay .btn {
-    font-size: 0.9rem;
-    padding: 0.5rem 1rem;
-    transition: all 0.3s ease;
-}
-
-.hero-product-overlay .btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 5px 15px rgba(0,0,0,0.3);
-}
-
-.text-truncate {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-/* Ensure vertical layout for 2 products */
-.row.g-0.h-100 > .col-12 {
-    height: 50%;
-}
-
-/* Responsive adjustments */
-@media (max-width: 1200px) {
-    .hero-product-overlay h5 {
-        font-size: 1.1rem;
-    }
-    .hero-product-overlay .fw-bold {
-        font-size: 1.2rem;
-    }
-}
-
-@media (max-width: 992px) {
-    .hero-section .col-lg-6 {
-        min-height: 60vh !important;
-    }
-    .hero-products-grid {
-        height: 60vh !important;
-    }
-}
-
-@media (max-width: 768px) {
-    .hero-section .col-lg-6 {
-        min-height: 50vh !important;
-    }
-    .hero-products-grid {
-        height: 50vh !important;
-    }
-    .hero-product-overlay h5 {
-        font-size: 1rem;
-    }
-    .hero-product-overlay .fw-bold {
-        font-size: 1.1rem;
-    }
-    .hero-product-overlay {
-        padding: 1.5rem !important;
-    }
-}
-
-@media (max-width: 576px) {
-    .hero-product-overlay h5 {
-        font-size: 0.9rem;
-    }
-    .hero-product-overlay .fw-bold {
-        font-size: 1rem;
-    }
-    .hero-product-overlay .badge {
-        font-size: 0.75rem;
-        padding: 0.3rem 0.6rem;
-    }
-    .hero-product-overlay .btn {
-        font-size: 0.8rem;
-        padding: 0.4rem 0.8rem;
-    }
-}
-
-/* Animation for carousel slide change */
-.carousel-item {
-    transition: transform 0.6s ease-in-out;
-}
-
-/* Hover effect for entire product background */
-.hero-product-background {
-    cursor: pointer;
-}
-
-/* Ensure images don't overflow on hover */
-.hero-product-background {
-    overflow: hidden;
-}
-</style>
 
 <!-- Features Bar -->
 <section class="py-4 bg-light border-bottom">
@@ -605,7 +259,7 @@ require_once 'includes/header.php';
                 <p class="text-muted">Fresh styles just landed</p>
             </div>
             <?php if (!empty($newArrivals)): ?>
-            <a href="<?php echo SITE_URL; ?>products?sort=newest" class="btn btn-outline-dark">
+            <a href="<?php echo SITE_URL; ?>products?sort=newest" class="btn btn-outline-primary">
                 View All <i class="fas fa-arrow-right ms-2"></i>
             </a>
             <?php endif; ?>
@@ -638,7 +292,7 @@ require_once 'includes/header.php';
                                              onerror="this.onerror=null; this.src='<?php echo SITE_URL; ?>assets/images/placeholder.jpg';">
                                         <!-- Quick View Overlay -->
                                         <div class="product-overlay position-absolute top-0 start-0 w-100 h-100 bg-dark bg-opacity-10 d-flex align-items-center justify-content-center opacity-0">
-                                            <button class="btn btn-dark rounded-pill px-4 quick-view-btn" 
+                                            <button class="btn btn-primary rounded-pill px-4 quick-view-btn" 
                                                     data-product-id="<?php echo $product['id']; ?>">
                                                 Quick View
                                             </button>
@@ -701,7 +355,7 @@ require_once 'includes/header.php';
                                         
                                         <!-- Add to Cart Button -->
                                         <button type="button" 
-                                                class="btn btn-dark w-100 add-to-cart-btn"
+                                                class="btn btn-primary w-100 add-to-cart-btn"
                                                 data-product-id="<?php echo $product['id']; ?>"
                                                 data-product-name="<?php echo htmlspecialchars($product['name']); ?>"
                                                 <?php echo $stockStatus['text'] === 'Out of Stock' ? 'disabled' : ''; ?>>
@@ -709,21 +363,7 @@ require_once 'includes/header.php';
                                             <?php echo $stockStatus['text'] === 'Out of Stock' ? 'Out of Stock' : 'Add to Cart'; ?>
                                         </button>
                                         
-                                        <!-- Quick Actions -->
-                                        <div class="d-flex justify-content-center gap-2 mt-3">
-                                            <button type="button" 
-                                                    class="btn btn-outline-dark btn-sm quick-view-btn"
-                                                    data-product-id="<?php echo $product['id']; ?>"
-                                                    title="Quick View">
-                                                <i class="fas fa-eye"></i>
-                                            </button>
-                                            <button type="button" 
-                                                    class="btn btn-outline-dark btn-sm add-to-wishlist"
-                                                    data-product-id="<?php echo $product['id']; ?>"
-                                                    title="Add to Wishlist">
-                                                <i class="far fa-heart"></i>
-                                            </button>
-                                        </div>
+                                     
                                     </div>
                                 </div>
                             </div>
@@ -776,7 +416,7 @@ require_once 'includes/header.php';
                 <p class="text-muted">Most loved by our customers</p>
             </div>
             <?php if (!empty($bestSellers)): ?>
-            <a href="<?php echo SITE_URL; ?>products?sort=best_selling" class="btn btn-outline-dark">
+            <a href="<?php echo SITE_URL; ?>products?sort=best_selling" class="btn btn-outline-primary">
                 View All <i class="fas fa-arrow-right ms-2"></i>
             </a>
             <?php endif; ?>
@@ -809,7 +449,7 @@ require_once 'includes/header.php';
                                              onerror="this.onerror=null; this.src='<?php echo SITE_URL; ?>assets/images/placeholder.jpg';">
                                         <!-- Quick View Overlay -->
                                         <div class="product-overlay position-absolute top-0 start-0 w-100 h-100 bg-dark bg-opacity-10 d-flex align-items-center justify-content-center opacity-0">
-                                            <button class="btn btn-dark rounded-pill px-4 quick-view-btn" 
+                                            <button class="btn btn-primary rounded-pill px-4 quick-view-btn" 
                                                     data-product-id="<?php echo $product['id']; ?>">
                                                 Quick View
                                             </button>
@@ -872,7 +512,7 @@ require_once 'includes/header.php';
                                         
                                         <!-- Add to Cart Button -->
                                         <button type="button" 
-                                                class="btn btn-dark w-100 add-to-cart-btn"
+                                                class="btn btn-primary w-100 add-to-cart-btn"
                                                 data-product-id="<?php echo $product['id']; ?>"
                                                 data-product-name="<?php echo htmlspecialchars($product['name']); ?>"
                                                 <?php echo $stockStatus['text'] === 'Out of Stock' ? 'disabled' : ''; ?>>
@@ -880,21 +520,6 @@ require_once 'includes/header.php';
                                             <?php echo $stockStatus['text'] === 'Out of Stock' ? 'Out of Stock' : 'Add to Cart'; ?>
                                         </button>
                                         
-                                        <!-- Quick Actions -->
-                                        <div class="d-flex justify-content-center gap-2 mt-3">
-                                            <button type="button" 
-                                                    class="btn btn-outline-dark btn-sm quick-view-btn"
-                                                    data-product-id="<?php echo $product['id']; ?>"
-                                                    title="Quick View">
-                                                <i class="fas fa-eye"></i>
-                                            </button>
-                                            <button type="button" 
-                                                    class="btn btn-outline-dark btn-sm add-to-wishlist"
-                                                    data-product-id="<?php echo $product['id']; ?>"
-                                                    title="Add to Wishlist">
-                                                <i class="far fa-heart"></i>
-                                            </button>
-                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -947,7 +572,7 @@ require_once 'includes/header.php';
                 <p class="text-muted">Limited time offers</p>
             </div>
             <?php if (!empty($saleProducts)): ?>
-            <a href="<?php echo SITE_URL; ?>products?filter=on_sale" class="btn btn-outline-dark">
+            <a href="<?php echo SITE_URL; ?>products?filter=on_sale" class="btn btn-outline-primary">
                 View All <i class="fas fa-arrow-right ms-2"></i>
             </a>
             <?php endif; ?>
@@ -983,7 +608,7 @@ require_once 'includes/header.php';
                                              onerror="this.onerror=null; this.src='<?php echo SITE_URL; ?>assets/images/placeholder.jpg';">
                                         <!-- Quick View Overlay -->
                                         <div class="product-overlay position-absolute top-0 start-0 w-100 h-100 bg-dark bg-opacity-10 d-flex align-items-center justify-content-center opacity-0">
-                                            <button class="btn btn-dark rounded-pill px-4 quick-view-btn" 
+                                            <button class="btn btn-primary rounded-pill px-4 quick-view-btn" 
                                                     data-product-id="<?php echo $product['id']; ?>">
                                                 Quick View
                                             </button>
@@ -1044,7 +669,7 @@ require_once 'includes/header.php';
                                         
                                         <!-- Add to Cart Button -->
                                         <button type="button" 
-                                                class="btn btn-danger w-100 add-to-cart-btn"
+                                                class="btn btn-primary w-100 add-to-cart-btn"
                                                 data-product-id="<?php echo $product['id']; ?>"
                                                 data-product-name="<?php echo htmlspecialchars($product['name']); ?>"
                                                 <?php echo $stockStatus['text'] === 'Out of Stock' ? 'disabled' : ''; ?>>
@@ -1052,21 +677,6 @@ require_once 'includes/header.php';
                                             <?php echo $stockStatus['text'] === 'Out of Stock' ? 'Out of Stock' : 'Add to Cart'; ?>
                                         </button>
                                         
-                                        <!-- Quick Actions -->
-                                        <div class="d-flex justify-content-center gap-2 mt-3">
-                                            <button type="button" 
-                                                    class="btn btn-outline-danger btn-sm quick-view-btn"
-                                                    data-product-id="<?php echo $product['id']; ?>"
-                                                    title="Quick View">
-                                                <i class="fas fa-eye"></i>
-                                            </button>
-                                            <button type="button" 
-                                                    class="btn btn-outline-danger btn-sm add-to-wishlist"
-                                                    data-product-id="<?php echo $product['id']; ?>"
-                                                    title="Add to Wishlist">
-                                                <i class="far fa-heart"></i>
-                                            </button>
-                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -1111,11 +721,11 @@ require_once 'includes/header.php';
 </section>
 
 <!-- Sale Banner -->
-<section class="py-5 py-lg-7 bg-dark text-light">
+<section class="py-5 py-lg-7 bg-gradient-primary text-white">
     <div class="container px-0">
         <div class="row align-items-center">
             <div class="col-lg-6 mb-5 mb-lg-0">
-                <span class="badge bg-danger mb-3 px-3 py-2">Limited Time</span>
+                <span class="badge bg-light text-primary mb-3 px-3 py-2 rounded-pill">Limited Time</span>
                 <h2 class="display-4 fw-bold mb-4">Summer Sale<br>Up to 50% Off</h2>
                 <p class="lead mb-5">Refresh your wardrobe with our premium linen collection at amazing prices.</p>
                 
@@ -1297,7 +907,7 @@ require_once 'includes/header.php';
     <div class="container px-0">
         <div class="row justify-content-center">
             <div class="col-lg-8">
-                <div class="newsletter-card bg-dark text-light p-5 rounded-4 text-center">
+                <div class="newsletter-card bg-gradient-primary  text-light p-5 rounded-4 text-center">
                     <i class="fas fa-envelope-open-text fa-3x mb-4"></i>
                     <h2 class="display-5 fw-bold mb-3">Stay in the Loop</h2>
                     <p class="lead mb-4">Subscribe to our newsletter for exclusive offers, style tips, and new arrivals.</p>
@@ -1349,6 +959,19 @@ require_once 'includes/header.php';
 </div>
 
 <style>
+
+
+:root {
+    --primary-color: #4a64d6ff;
+    --primary-light: #eef2ff;
+    --secondary-color: #3a0ca3;
+    --accent-color: #f72585;
+    --dark-color: #1a1a2e;
+    --light-color: #f8f9fa;
+    --success-color: #4cc9f0;
+    --warning-color: #f8961e;
+    --danger-color: #f94144;
+}  
 /* Homepage Specific Styles */
 .hero-section {
     background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
@@ -1403,6 +1026,16 @@ require_once 'includes/header.php';
     position: relative;
     overflow: hidden;
     border-radius: 12px;
+}
+.text-gradient-primary {
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.bg-gradient-primary {
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color)) !important;
 }
 
 /* Responsive adjustments for categories */

@@ -1,5 +1,3 @@
-// /linen-closet/assets/js/products.js
-
 /**
  * Minimal Product Catalog - Only handles interactive features
  * Doesn't interfere with PHP rendering
@@ -105,15 +103,7 @@ class ProductCatalog {
             }
         });
         
-        // Wishlist buttons (delegated)
-        document.addEventListener('click', (e) => {
-            const wishlistBtn = e.target.closest('.wishlist-btn');
-            if (wishlistBtn) {
-                e.preventDefault();
-                const productId = wishlistBtn.dataset.id;
-                this.toggleWishlist(productId);
-            }
-        });
+        // REMOVED WISHLIST BUTTON HANDLING - Now handled in products/index.php
         
         // Pagination links - Prevent default and update URL
         document.querySelectorAll('.pagination .page-link').forEach(link => {
@@ -402,122 +392,15 @@ class ProductCatalog {
             }, 1000);
         });
     }
-    
-    async toggleWishlist(productId) {
-        try {
-            // For now, just show a message
-            const btn = document.querySelector(`.wishlist-btn[data-id="${productId}"]`);
-            if (btn) {
-                const icon = btn.querySelector('i');
-                const isInWishlist = icon.classList.contains('fas');
-                
-                // Show loading state
-                const originalClass = icon.className;
-                icon.className = 'fas fa-spinner fa-spin';
-                
-                // Simulate API call
-                setTimeout(() => {
-                    if (isInWishlist) {
-                        icon.classList.remove('fas', 'text-danger', 'fa-spinner', 'fa-spin');
-                        icon.classList.add('far');
-                        btn.title = 'Add to wishlist';
-                        
-                        Swal.fire({
-                            icon: 'success',
-                            title: 'Removed from wishlist',
-                            showConfirmButton: false,
-                            timer: 1500,
-                            toast: true,
-                            position: 'bottom-end'
-                        });
-                    } else {
-                        icon.classList.remove('far', 'fa-spinner', 'fa-spin');
-                        icon.classList.add('fas', 'text-danger');
-                        btn.title = 'Remove from wishlist';
-                        
-                        Swal.fire({
-                            icon: 'success',
-                            title: 'Added to wishlist',
-                            showConfirmButton: false,
-                            timer: 1500,
-                            toast: true,
-                            position: 'bottom-end'
-                        });
-                    }
-                }, 800);
-            }
-        } catch (error) {
-            console.error('Error toggling wishlist:', error);
-            Swal.fire({
-                icon: 'error',
-                title: 'Error!',
-                text: 'Something went wrong. Please try again.',
-                toast: true,
-                position: 'bottom-end'
-            });
-        }
-    }
 }
 
 // Initialize product catalog when DOM is loaded
 let productCatalog;
 
-document.addEventListener('DOMContentLoaded', () => {
-    // Check if we're on products page
+// After initializing ProductCatalog
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize ProductCatalog
     if (document.getElementById('products-container')) {
-        productCatalog = new ProductCatalog();
-        window.productCatalog = productCatalog; // Make it globally accessible
+        window.productCatalog = new ProductCatalog();
     }
 });
-
-// Add CSS for animations and styles
-const style = document.createElement('style');
-style.textContent = `
-    /* View toggle styles */
-    .products-grid-view #products-container {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-        gap: 1.5rem;
-    }
-    
-    .products-list-view #products-container {
-        display: flex;
-        flex-direction: column;
-        gap: 1rem;
-    }
-    
-    .products-list-view .product-card {
-        display: flex;
-        flex-direction: row;
-    }
-    
-    .products-list-view .product-card img {
-        width: 200px;
-        height: 200px;
-        object-fit: cover;
-    }
-    
-    /* Loading animation */
-    @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(10px); }
-        to { opacity: 1; transform: translateY(0); }
-    }
-    
-    .product-card {
-        animation: fadeIn 0.3s ease-out;
-    }
-    
-    /* Active filter states */
-    .size-btn.active,
-    .color-option.active {
-        background-color: var(--bs-dark, #212529) !important;
-        color: white !important;
-        border-color: var(--bs-dark, #212529) !important;
-    }
-    
-    /* Cart count animation */
-    .cart-count.animate__bounceIn {
-        display: inline-block;
-    }
-`;
-document.head.appendChild(style);

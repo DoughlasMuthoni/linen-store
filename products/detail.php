@@ -38,11 +38,22 @@ if (!$product) {
     $app->redirect('products', ['error' => 'Product not found']);
 }
 
-// Fetch product images
+// Fetch product images with variant associations
 $imagesStmt = $db->prepare("
-    SELECT * FROM product_images 
-    WHERE product_id = ? 
-    ORDER BY is_primary DESC, sort_order ASC
+    SELECT 
+        pi.*,
+        pv.id as variant_id,
+        pv.size,
+        pv.color,
+        CONCAT(
+            COALESCE(pv.size, ''),
+            CASE WHEN pv.size IS NOT NULL AND pv.color IS NOT NULL THEN ' - ' ELSE '' END,
+            COALESCE(pv.color, '')
+        ) as variant_name
+    FROM product_images pi
+    LEFT JOIN product_variants pv ON pi.variant_id = pv.id
+    WHERE pi.product_id = ? 
+    ORDER BY pi.is_primary DESC, pi.sort_order ASC
 ");
 $imagesStmt->execute([$product['id']]);
 $productImages = $imagesStmt->fetchAll();
@@ -56,10 +67,24 @@ $variantsStmt = $db->prepare("
 $variantsStmt->execute([$product['id']]);
 $variants = $variantsStmt->fetchAll();
 
-// Extract unique sizes, colors, and materials from variants
+// Organize images by variant
+$variantImages = [];
+$generalImages = [];
+
+foreach ($productImages as $image) {
+    if ($image['variant_id']) {
+        if (!isset($variantImages[$image['variant_id']])) {
+            $variantImages[$image['variant_id']] = [];
+        }
+        $variantImages[$image['variant_id']][] = $image;
+    } else {
+        $generalImages[] = $image;
+    }
+}
+
+// Extract unique sizes and colors from variants
 $availableSizes = [];
 $availableColors = [];
-$availableMaterials = [];
 
 foreach ($variants as $variant) {
     if ($variant['size'] && !in_array($variant['size'], $availableSizes)) {
@@ -68,13 +93,9 @@ foreach ($variants as $variant) {
     if ($variant['color'] && !in_array($variant['color'], $availableColors)) {
         $availableColors[] = $variant['color'];
     }
-    // if ($variant['material'] && !in_array($variant['material'], $availableMaterials)) {
-    //     $availableMaterials[] = $variant['material'];
-    // }
 }
 
 // Fetch product specifications
-// Build specifications from product fields
 $specifications = [];
 if (!empty($product['materials'])) {
     $specifications[] = ['spec_name' => 'Materials', 'spec_value' => $product['materials']];
@@ -105,7 +126,6 @@ $relatedStmt = $db->prepare("
 $relatedStmt->execute([$product['category_id'], $product['id']]);
 $relatedProducts = $relatedStmt->fetchAll();
 
-// Fetch product reviews
 // Fetch product reviews
 $reviewsStmt = $db->prepare("
     SELECT 
@@ -173,22 +193,69 @@ require_once __DIR__ . '/../includes/header.php';
                              class="img-fluid w-100 h-100 object-fit-cover"
                              onerror="this.onerror=null; this.src='<?php echo SITE_URL; ?>assets/images/placeholder.jpg';">
                     </div>
+                   <!-- Image Variant Indicator (New) -->
+                    <div id="imageVariantInfo" class="mt-2 text-center" style="display: none;">
+                        <span class="badge bg-info">
+                            <i class="fas fa-tag me-1"></i>
+                            <span id="currentImageVariant">Variant info will appear here</span>
+                        </span>
+                    </div>
+                    
+                    <!-- Variant Image Indicator -->
+                    <div id="variantImageIndicator" class="mt-2 text-center" style="display: none;">
+                        <span class="badge bg-warning text-dark">
+                            <i class="fas fa-image me-1"></i> Showing variant-specific images
+                        </span>
+                    </div>
                 </div>
                 
+               
                 <!-- Image Thumbnails -->
-                <?php if (count($productImages) > 1): ?>
-                    <div class="image-thumbnails d-flex gap-2">
-                        <?php foreach ($productImages as $index => $image): ?>
-                            <div class="thumbnail <?php echo $index === 0 ? 'active' : ''; ?>"
-                                 style="width: 80px; height: 80px; cursor: pointer;"
-                                 data-image="<?php echo SITE_URL . $image['image_url']; ?>">
-                                <img src="<?php echo SITE_URL . $image['image_url']; ?>" 
-                                     alt="<?php echo htmlspecialchars($product['name']); ?> - Image <?php echo $index + 1; ?>" 
-                                     class="img-fluid rounded border w-100 h-100 object-fit-cover">
-                            </div>
-                        <?php endforeach; ?>
+<div class="image-thumbnails d-flex gap-2 flex-wrap" id="imageThumbnails">
+    <?php 
+    // Show general images by default
+    $imagesToShow = !empty($generalImages) ? $generalImages : $productImages;
+    foreach ($imagesToShow as $index => $image): 
+        if ($index < 8): // Limit to 8 thumbnails 
+            // Get variant info for this image
+            $variantInfo = '';
+            if ($image['variant_id']) {
+                // Find the variant for this image
+                foreach ($variants as $variant) {
+                    if ($variant['id'] == $image['variant_id']) {
+                        $variantInfo = htmlspecialchars($variant['size'] ?? '') . 
+                                      ($variant['size'] && $variant['color'] ? ' - ' : '') . 
+                                      htmlspecialchars($variant['color'] ?? '');
+                        break;
+                    }
+                }
+            }
+        ?>
+            <div class="thumbnail <?php echo $index === 0 ? 'active' : ''; ?>"
+                 style="width: 80px; height: 80px; cursor: pointer; position: relative;"
+                 data-image="<?php echo SITE_URL . $image['image_url']; ?>"
+                 data-variant-id="<?php echo $image['variant_id'] ?: '0'; ?>"
+                 data-variant-info="<?php echo $variantInfo; ?>">
+                <img src="<?php echo SITE_URL . $image['image_url']; ?>" 
+                     alt="<?php echo htmlspecialchars($product['name']); ?> - Image <?php echo $index + 1; ?>" 
+                     class="img-fluid rounded border w-100 h-100 object-fit-cover"
+                     onerror="this.onerror=null; this.src='<?php echo SITE_URL; ?>assets/images/placeholder.jpg';">
+                <?php if ($image['variant_id']): ?>
+                    <div class="variant-badge position-absolute top-0 start-0 bg-info text-white px-1 small">
+                        <i class="fas fa-tag"></i>
                     </div>
                 <?php endif; ?>
+            </div>
+        <?php endif;
+    endforeach; 
+    
+    if (count($imagesToShow) === 0): ?>
+        <div class="col-12 text-center text-muted py-2">
+            <i class="fas fa-image fa-lg"></i>
+            <p class="small mt-2">No images available</p>
+        </div>
+    <?php endif; ?>
+</div>
                 
                 <!-- Product Actions -->
                 <div class="d-flex gap-2 mt-4">
@@ -273,22 +340,26 @@ require_once __DIR__ . '/../includes/header.php';
                     <?php endif; ?>
                 </div>
                 
-                <!-- Price -->
-                <div class="mb-4">
-                    <h2 class="text-dark fw-bold display-6">
-                        Ksh <?php echo number_format($product['price'], 2); ?>
-                    </h2>
-                    <?php if ($product['compare_price'] && $product['compare_price'] > $product['price']): ?>
-                        <div class="d-flex align-items-center gap-2">
-                            <span class="text-muted text-decoration-line-through fs-5">
-                                Ksh <?php echo number_format($product['compare_price'], 2); ?>
-                            </span>
-                            <span class="badge bg-danger fs-6">
-                                Save <?php echo round((($product['compare_price'] - $product['price']) / $product['compare_price']) * 100); ?>%
-                            </span>
-                        </div>
-                    <?php endif; ?>
-                </div>
+              <!-- Price -->
+<div class="mb-4">
+    <h2 class="text-dark fw-bold display-6" id="productPrice">
+        Ksh <?php echo number_format($product['price'], 2); ?>
+    </h2>
+    
+    <!-- Compare Price Section - This will be dynamically updated -->
+    <div id="comparePriceContainer">
+        <?php if ($product['compare_price'] && $product['compare_price'] > $product['price']): ?>
+            <div class="d-flex align-items-center gap-2" id="comparePriceSection">
+                <span class="text-muted text-decoration-line-through fs-5" id="comparePriceText">
+                    Ksh <?php echo number_format($product['compare_price'], 2); ?>
+                </span>
+                <span class="badge bg-danger fs-6" id="discountPercentage">
+                    Save <?php echo round((($product['compare_price'] - $product['price']) / $product['compare_price']) * 100); ?>%
+                </span>
+            </div>
+        <?php endif; ?>
+    </div>
+</div>
                 
                 <!-- Variant Selection Form -->
                 <form id="addToCartForm" class="mb-4">
@@ -310,9 +381,9 @@ require_once __DIR__ . '/../includes/header.php';
                                             <input type="radio" 
                                                    name="size" 
                                                    value="<?php echo htmlspecialchars($size); ?>" 
-                                                   class="d-none"
+                                                   class="d-none variant-option"
                                                    <?php echo !$sizeInStock ? 'disabled' : ''; ?>
-                                                   required>
+                                                   data-type="size">
                                             <div class="size-btn btn <?php echo $sizeInStock ? 'btn-outline-dark' : 'btn-outline-secondary'; ?>">
                                                 <?php echo htmlspecialchars($size); ?>
                                                 <?php if (!$sizeInStock): ?>
@@ -341,9 +412,9 @@ require_once __DIR__ . '/../includes/header.php';
                                             <input type="radio" 
                                                    name="color" 
                                                    value="<?php echo htmlspecialchars($color); ?>" 
-                                                   class="d-none"
+                                                   class="d-none variant-option"
                                                    <?php echo !$colorInStock ? 'disabled' : ''; ?>
-                                                   required>
+                                                   data-type="color">
                                             <div class="color-btn rounded-circle border <?php echo !$colorInStock ? 'opacity-50' : ''; ?>"
                                                  style="width: 40px; height: 40px; background-color: <?php 
                                                  // Try to find color code
@@ -360,29 +431,30 @@ require_once __DIR__ . '/../includes/header.php';
                             </div>
                         <?php endif; ?>
                         
-                        <!-- Material Selection -->
-                        <?php if (!empty($availableMaterials)): ?>
-                            <div class="mb-4">
-                                <label class="form-label fw-bold">Material</label>
-                                <select name="material" class="form-select">
-                                    <option value="">Select Material</option>
-                                    <?php foreach ($availableMaterials as $material): ?>
-                                        <option value="<?php echo htmlspecialchars($material); ?>">
-                                            <?php echo htmlspecialchars($material); ?>
-                                        </option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-                        <?php endif; ?>
-                        
-                        <!-- Variant-specific details will be shown here -->
+                        <!-- Variant-specific details -->
                         <div id="variantDetails" class="mb-4" style="display: none;">
                             <div class="card border-success">
-                                <div class="card-body">
-                                    <h6 class="card-title text-success">
-                                        <i class="fas fa-check-circle me-2"></i> Variant Selected
+                                <div class="card-body p-3">
+                                    <h6 class="card-title text-success mb-2">
+                                        <i class="fas fa-check-circle me-2"></i> Selected Variant
                                     </h6>
-                                    <div id="variantInfo"></div>
+                                    <div id="variantInfo" class="row small">
+                                        <div class="col-6">
+                                            <strong>Size:</strong> <span id="selectedSize">-</span>
+                                        </div>
+                                        <div class="col-6">
+                                            <strong>Color:</strong> <span id="selectedColor">-</span>
+                                        </div>
+                                        <div class="col-6 mt-1">
+                                            <strong>SKU:</strong> <span id="selectedSku">-</span>
+                                        </div>
+                                        <div class="col-6 mt-1">
+                                            <strong>Stock:</strong> <span id="selectedStock">-</span>
+                                        </div>
+                                        <div class="col-12 mt-1">
+                                            <strong>Price:</strong> <span id="selectedPrice" class="fw-bold">-</span>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -401,7 +473,7 @@ require_once __DIR__ . '/../includes/header.php';
                                    class="form-control text-center border-dark rounded-0" 
                                    value="1" 
                                    min="1" 
-                                   max="<?php echo $product['stock_quantity'] ?? 10; ?>">
+                                   max="100">
                             <button type="button" class="btn btn-outline-dark" id="increaseQty">
                                 <i class="fas fa-plus"></i>
                             </button>
@@ -552,26 +624,6 @@ require_once __DIR__ . '/../includes/header.php';
                     <div class="product-description">
                         <?php echo nl2br(htmlspecialchars($product['description'] ?? 'No description available.')); ?>
                     </div>
-                    
-                    <?php if (!empty($product['features'])): ?>
-                        <div class="mt-5">
-                            <h5 class="fw-bold mb-4">Key Features</h5>
-                            <div class="row">
-                                <?php 
-                                $features = explode("\n", $product['features']);
-                                foreach ($features as $feature): 
-                                    if (trim($feature)): ?>
-                                        <div class="col-md-6 mb-3">
-                                            <div class="d-flex">
-                                                <i class="fas fa-check-circle text-success me-3 mt-1"></i>
-                                                <span><?php echo htmlspecialchars(trim($feature)); ?></span>
-                                            </div>
-                                        </div>
-                                    <?php endif; ?>
-                                <?php endforeach; ?>
-                            </div>
-                        </div>
-                    <?php endif; ?>
                 </div>
                 
                 <!-- Specifications Tab -->
@@ -656,87 +708,67 @@ require_once __DIR__ . '/../includes/header.php';
                         </div>
                     </div>
                     
-                    
                     <!-- Reviews List -->
-<div class="reviews-list">
-    <?php if (!empty($reviews)): ?>
-        <?php foreach ($reviews as $review): ?>
-            <div class="review-item card border-0 shadow-sm mb-3">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-start mb-3">
-                        <div class="d-flex align-items-center">
-                            <div class="bg-dark text-white rounded-circle d-flex align-items-center justify-content-center me-3" 
-                                 style="width: 50px; height: 50px;">
-                                <?php 
-                                $initials = 'U';
-                                if (!empty($review['full_name'])) {
-                                    $nameParts = explode(' ', trim($review['full_name']));
-                                    if (count($nameParts) >= 2) {
-                                        $initials = strtoupper(substr($nameParts[0], 0, 1) . substr($nameParts[1], 0, 1));
-                                    } else {
-                                        $initials = strtoupper(substr($review['full_name'], 0, 2));
-                                    }
-                                }
-                                echo htmlspecialchars($initials);
-                                ?>
+                    <div class="reviews-list">
+                        <?php if (!empty($reviews)): ?>
+                            <?php foreach ($reviews as $review): ?>
+                                <div class="review-item card border-0 shadow-sm mb-3">
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-start mb-3">
+                                            <div class="d-flex align-items-center">
+                                                <div class="bg-dark text-white rounded-circle d-flex align-items-center justify-content-center me-3" 
+                                                     style="width: 50px; height: 50px;">
+                                                    <?php 
+                                                    $initials = 'U';
+                                                    if (!empty($review['full_name'])) {
+                                                        $nameParts = explode(' ', trim($review['full_name']));
+                                                        if (count($nameParts) >= 2) {
+                                                            $initials = strtoupper(substr($nameParts[0], 0, 1) . substr($nameParts[1], 0, 1));
+                                                        } else {
+                                                            $initials = strtoupper(substr($review['full_name'], 0, 2));
+                                                        }
+                                                    }
+                                                    echo htmlspecialchars($initials);
+                                                    ?>
+                                                </div>
+                                                <div>
+                                                    <h6 class="mb-1 fw-bold">
+                                                        <?php echo htmlspecialchars($review['full_name'] ?? 'Anonymous User'); ?>
+                                                    </h6>
+                                                    <small class="text-muted">
+                                                        <?php echo date('F j, Y', strtotime($review['created_at'])); ?>
+                                                        <?php if (!empty($review['member_since'])): ?>
+                                                            • Member since <?php echo date('Y', strtotime($review['member_since'])); ?>
+                                                        <?php endif; ?>
+                                                    </small>
+                                                </div>
+                                            </div>
+                                            <div class="rating">
+                                                <?php for ($i = 1; $i <= 5; $i++): ?>
+                                                    <i class="fas fa-star <?php echo $i <= $review['rating'] ? 'text-warning' : 'text-muted'; ?>"></i>
+                                                <?php endfor; ?>
+                                            </div>
+                                        </div>
+                                        
+                                        <?php if (!empty($review['title'])): ?>
+                                            <h6 class="fw-bold mb-2"><?php echo htmlspecialchars($review['title']); ?></h6>
+                                        <?php endif; ?>
+                                        
+                                        <p class="mb-0"><?php echo nl2br(htmlspecialchars($review['review'] ?? '')); ?></p>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <div class="text-center py-5">
+                                <i class="fas fa-comments fa-3x text-muted mb-3"></i>
+                                <h5 class="fw-bold mb-3">No Reviews Yet</h5>
+                                <p class="text-muted mb-4">Be the first to review this product!</p>
+                                <button class="btn btn-dark" data-bs-toggle="modal" data-bs-target="#writeReviewModal">
+                                    <i class="fas fa-pen me-2"></i> Write a Review
+                                </button>
                             </div>
-                            <div>
-                                <h6 class="mb-1 fw-bold">
-                                    <?php echo htmlspecialchars($review['full_name'] ?? 'Anonymous User'); ?>
-                                </h6>
-                                <small class="text-muted">
-                                    <?php echo date('F j, Y', strtotime($review['created_at'])); ?>
-                                    <?php if (!empty($review['member_since'])): ?>
-                                        • Member since <?php echo date('Y', strtotime($review['member_since'])); ?>
-                                    <?php endif; ?>
-                                </small>
-                            </div>
-                        </div>
-                        <div class="rating">
-                            <?php for ($i = 1; $i <= 5; $i++): ?>
-                                <i class="fas fa-star <?php echo $i <= $review['rating'] ? 'text-warning' : 'text-muted'; ?>"></i>
-                            <?php endfor; ?>
-                        </div>
+                        <?php endif; ?>
                     </div>
-                    
-                    <?php if (!empty($review['title'])): ?>
-                        <h6 class="fw-bold mb-2"><?php echo htmlspecialchars($review['title']); ?></h6>
-                    <?php endif; ?>
-                    
-                    <p class="mb-0"><?php echo nl2br(htmlspecialchars($review['review'] ?? '')); ?></p>
-                    
-                    <!-- Note: If you add images column to reviews table, uncomment this -->
-                    <?php /* if (!empty($review['images'])): ?>
-                        <div class="review-images mt-3">
-                            <?php 
-                            $images = json_decode($review['images'], true);
-                            if (is_array($images) && !empty($images)):
-                                foreach ($images as $image): 
-                                    if (!empty($image)): ?>
-                                        <img src="<?php echo SITE_URL . $image; ?>" 
-                                             class="rounded me-2" 
-                                             style="width: 80px; height: 80px; object-fit: cover;"
-                                             alt="Review image"
-                                             onerror="this.style.display='none';">
-                                    <?php endif;
-                                endforeach; 
-                            endif; ?>
-                        </div>
-                    <?php endif; */ ?>
-                </div>
-            </div>
-        <?php endforeach; ?>
-    <?php else: ?>
-        <div class="text-center py-5">
-            <i class="fas fa-comments fa-3x text-muted mb-3"></i>
-            <h5 class="fw-bold mb-3">No Reviews Yet</h5>
-            <p class="text-muted mb-4">Be the first to review this product!</p>
-            <button class="btn btn-dark" data-bs-toggle="modal" data-bs-target="#writeReviewModal">
-                <i class="fas fa-pen me-2"></i> Write a Review
-            </button>
-        </div>
-    <?php endif; ?>
-</div>
                     
                     <!-- Write Review Button -->
                     <div class="text-center mt-4">
@@ -910,7 +942,8 @@ require_once __DIR__ . '/../includes/header.php';
                                     <a href="<?php echo $relatedUrl; ?>" class="text-decoration-none">
                                         <img src="<?php echo $relatedImage; ?>" 
                                              class="card-img-top h-100 w-100 object-fit-cover" 
-                                             alt="<?php echo htmlspecialchars($related['name']); ?>">
+                                             alt="<?php echo htmlspecialchars($related['name']); ?>"
+                                             onerror="this.onerror=null; this.src='<?php echo SITE_URL; ?>assets/images/placeholder.jpg';">
                                         <?php if ($relatedStock <= 0): ?>
                                             <div class="position-absolute top-0 start-0 w-100 h-100 bg-dark bg-opacity-50 d-flex align-items-center justify-content-center">
                                                 <span class="badge bg-secondary">Out of Stock</span>
@@ -947,25 +980,7 @@ require_once __DIR__ . '/../includes/header.php';
             </div>
         </div>
     <?php endif; ?>
-    
-    
-   <!-- More Reviews -->
-    <div class="row mt-5">
-        <div class="col-12">
-            <h2 class="fw-bold mb-4">More Reviews</h2>
-            <div id="reviewsList">
-                <!-- Reviews will be loaded here -->
-            </div>
-            <div class="text-center mt-4">
-                <a href="#reviews" class="btn btn-outline-dark" onclick="loadAllReviews()">
-                    <i class="fas fa-comments me-2"></i> View All Reviews
-                </a>
-            </div>
-        </div>
-    </div>
 </div>
-
-<!-- Write Review Modal -->
 
 <!-- Write Review Modal -->
 <div class="modal fade" id="writeReviewModal" tabindex="-1">
@@ -977,11 +992,8 @@ require_once __DIR__ . '/../includes/header.php';
             </div>
             
             <?php if (isset($_SESSION['user_id'])): ?>
-                <!-- Wrap everything in a form -->
                 <form id="reviewForm" onsubmit="event.preventDefault(); submitReview();">
                     <div class="modal-body">
-                        <!-- ... your existing modal body content ... -->
-                        
                         <div class="mb-4 text-center">
                             <h6 class="fw-bold mb-3">How would you rate this product?</h6>
                             <div class="rating-input d-flex justify-content-center">
@@ -1041,10 +1053,23 @@ require_once __DIR__ . '/../includes/header.php';
 </div>
 
 <style>
+:root {
+    --primary-color: #4361ee;
+    --primary-light: #eef2ff;
+    --secondary-color: #3a0ca3;
+    --accent-color: #f72585;
+    --dark-color: #1a1a2e;
+    --light-color: #f8f9fa;
+    --success-color: #4cc9f0;
+    --warning-color: #f8961e;
+    --danger-color: #f94144;
+}
+
 /* Product Detail Styles */
 .product-images-container .thumbnail {
     transition: all 0.3s ease;
     border: 2px solid transparent;
+    position: relative;
 }
 
 .product-images-container .thumbnail.active {
@@ -1054,6 +1079,12 @@ require_once __DIR__ . '/../includes/header.php';
 .product-images-container .thumbnail:hover {
     border-color: #666;
     transform: scale(1.05);
+}
+
+.product-images-container .thumbnail .variant-badge {
+    border-radius: 0 0 4px 0;
+    font-size: 0.6rem;
+    padding: 2px 4px;
 }
 
 .quantity-selector input[type="number"] {
@@ -1163,12 +1194,37 @@ require_once __DIR__ . '/../includes/header.php';
 </style>
 
 <script>
+// Store product data for JavaScript use
+const productData = {
+    id: <?php echo $product['id']; ?>,
+    basePrice: <?php echo $product['price']; ?>,
+    baseComparePrice: <?php echo $product['compare_price'] ?: 'null'; ?>,
+    variants: <?php echo json_encode($variants); ?>,
+    images: <?php echo json_encode($productImages); ?>,
+    variantImages: <?php echo json_encode($variantImages); ?>,
+    generalImages: <?php echo json_encode($generalImages); ?>
+};
+
+// Track current state
+let currentVariantId = null;
+let selectedSize = null;
+let selectedColor = null;
+
 document.addEventListener('DOMContentLoaded', function() {
+    // Image thumbnail click handler
+    const firstThumbnail = document.querySelector('.thumbnail');
+        if (firstThumbnail) {
+            const variantId = firstThumbnail.dataset.variantId;
+            const variantInfo = firstThumbnail.dataset.variantInfo;
+            showImageVariantInfo(variantId, variantInfo);
+        }
     // Image thumbnail click handler
     document.querySelectorAll('.thumbnail').forEach(thumb => {
         thumb.addEventListener('click', function() {
             const mainImage = document.getElementById('mainProductImage');
             const imageUrl = this.dataset.image;
+            const variantId = this.dataset.variantId;
+            const variantInfo = this.dataset.variantInfo;
             
             // Update main image
             mainImage.src = imageUrl;
@@ -1176,9 +1232,205 @@ document.addEventListener('DOMContentLoaded', function() {
             // Update active thumbnail
             document.querySelectorAll('.thumbnail').forEach(t => t.classList.remove('active'));
             this.classList.add('active');
+            
+            // Show variant info if available
+            showImageVariantInfo(variantId, variantInfo);
         });
+         // Add to cart button
+    document.querySelector('.add-to-cart-btn').addEventListener('click', function() {
+        addToCartDetail(false);
     });
     
+    // Buy now button
+    document.querySelector('.buy-now-btn').addEventListener('click', function() {
+        addToCartDetail(true);
+    });
+    });
+
+    // Function to show variant info for the selected image
+    function showImageVariantInfo(variantId, variantInfo) {
+        const variantInfoElement = document.getElementById('imageVariantInfo');
+        const currentImageVariantElement = document.getElementById('currentImageVariant');
+        
+        if (variantId !== '0' && variantInfo && variantInfo.trim() !== '') {
+            // This image belongs to a specific variant
+            currentImageVariantElement.textContent = variantInfo;
+            
+            // Also highlight the corresponding variant selection if available
+            highlightCorrespondingVariant(variantId, variantInfo);
+            
+            // Show the variant info badge
+            variantInfoElement.style.display = 'block';
+        } else {
+            // This is a general image (not variant-specific)
+            currentImageVariantElement.textContent = 'General Image - Applies to all variants';
+            variantInfoElement.style.display = 'block';
+        }
+    }
+
+    // Function to highlight the corresponding variant in the selection
+    function highlightCorrespondingVariant(variantId, variantInfo) {
+        // Find the variant in our data
+        const variant = productData.variants.find(v => v.id == variantId);
+        
+        if (variant) {
+            // Try to select the corresponding size and color
+            if (variant.size) {
+                const sizeRadio = document.querySelector(`input[name="size"][value="${variant.size}"]`);
+                if (sizeRadio && !sizeRadio.disabled) {
+                    sizeRadio.checked = true;
+                    selectedSize = variant.size;
+                    
+                    // Trigger visual selection
+                    const sizeOption = sizeRadio.closest('.size-option');
+                    if (sizeOption) {
+                        document.querySelectorAll('.size-option .size-btn').forEach(btn => {
+                            btn.classList.remove('btn-dark', 'text-white');
+                            btn.classList.add('btn-outline-dark');
+                        });
+                        
+                        const sizeBtn = sizeOption.querySelector('.size-btn');
+                        if (sizeBtn) {
+                            sizeBtn.classList.remove('btn-outline-dark');
+                            sizeBtn.classList.add('btn-dark', 'text-white');
+                        }
+                    }
+                }
+            }
+            
+            if (variant.color) {
+                const colorRadio = document.querySelector(`input[name="color"][value="${variant.color}"]`);
+                if (colorRadio && !colorRadio.disabled) {
+                    colorRadio.checked = true;
+                    selectedColor = variant.color;
+                    
+                    // Trigger visual selection
+                    const colorOption = colorRadio.closest('.color-option');
+                    if (colorOption) {
+                        document.querySelectorAll('.color-option .color-btn').forEach(btn => {
+                            btn.style.border = '1px solid #dee2e6';
+                        });
+                        
+                        const colorBtn = colorOption.querySelector('.color-btn');
+                        if (colorBtn) {
+                            colorBtn.style.border = '3px solid #000';
+                        }
+                    }
+                }
+            }
+            
+            // Update variant details
+            updateVariantDetails();
+        }
+    }
+
+    // Initialize with first image's variant info
+    // document.addEventListener('DOMContentLoaded', function() { 
+    // });
+
+    // Update the updateProductImages function to also update variant info
+    function updateProductImages(variantId) {
+        const thumbnailsContainer = document.getElementById('imageThumbnails');
+        const indicator = document.getElementById('variantImageIndicator');
+        const variantInfoElement = document.getElementById('imageVariantInfo');
+        
+        // Clear existing thumbnails
+        thumbnailsContainer.innerHTML = '';
+        
+        let imagesToShow = [];
+        
+        if (variantId && productData.variantImages[variantId]) {
+            // Show variant-specific images first, then general images
+            imagesToShow = [...productData.variantImages[variantId], ...productData.generalImages];
+            indicator.style.display = 'block';
+            variantInfoElement.style.display = 'none'; // Hide when showing filtered images
+        } else {
+            // Show only general images
+            imagesToShow = productData.generalImages;
+            indicator.style.display = 'none';
+        }
+        
+        // If no images, show placeholder
+        if (imagesToShow.length === 0) {
+            thumbnailsContainer.innerHTML = `
+                <div class="col-12 text-center text-muted py-2">
+                    <i class="fas fa-image fa-lg"></i>
+                    <p class="small mt-2">No images available</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // Create thumbnails
+        imagesToShow.forEach((image, index) => {
+            if (index < 8) { // Limit to 8 thumbnails
+                // Get variant info for this image
+                let variantInfo = '';
+                if (image.variant_id) {
+                    const variant = productData.variants.find(v => v.id == image.variant_id);
+                    if (variant) {
+                        variantInfo = (variant.size || '') + 
+                                    (variant.size && variant.color ? ' - ' : '') + 
+                                    (variant.color || '');
+                    }
+                }
+                
+                const thumbnail = document.createElement('div');
+                thumbnail.className = `thumbnail ${index === 0 ? 'active' : ''}`;
+                thumbnail.style.cssText = 'width: 80px; height: 80px; cursor: pointer; position: relative;';
+                thumbnail.dataset.image = '<?php echo SITE_URL; ?>' + image.image_url;
+                thumbnail.dataset.variantId = image.variant_id || '0';
+                thumbnail.dataset.variantInfo = variantInfo;
+                
+                thumbnail.innerHTML = `
+                    <img src="<?php echo SITE_URL; ?>${image.image_url}" 
+                        alt="<?php echo htmlspecialchars($product['name']); ?> - Image ${index + 1}" 
+                        class="img-fluid rounded border w-100 h-100 object-fit-cover"
+                        onerror="this.onerror=null; this.src='<?php echo SITE_URL; ?>assets/images/placeholder.jpg';">
+                    ${image.variant_id ? 
+                        '<div class="variant-badge position-absolute top-0 start-0 bg-info text-white px-1 small">' +
+                        '<i class="fas fa-tag"></i></div>' : ''}
+                `;
+                
+                thumbnail.addEventListener('click', function() {
+                    const mainImage = document.getElementById('mainProductImage');
+                    mainImage.src = this.dataset.image;
+                    
+                    document.querySelectorAll('.thumbnail').forEach(t => t.classList.remove('active'));
+                    this.classList.add('active');
+                    
+                    // Show variant info
+                    showImageVariantInfo(this.dataset.variantId, this.dataset.variantInfo);
+                });
+                
+                thumbnailsContainer.appendChild(thumbnail);
+            }
+        });
+        
+        // Update main image to first thumbnail
+        if (imagesToShow.length > 0) {
+            const mainImage = document.getElementById('mainProductImage');
+            mainImage.src = '<?php echo SITE_URL; ?>' + imagesToShow[0].image_url;
+            
+            // Show variant info for first image
+            const firstImage = imagesToShow[0];
+            let variantInfo = '';
+            if (firstImage.variant_id) {
+                const variant = productData.variants.find(v => v.id == firstImage.variant_id);
+                if (variant) {
+                    variantInfo = (variant.size || '') + 
+                                (variant.size && variant.color ? ' - ' : '') + 
+                                (variant.color || '');
+                }
+            }
+            
+            // Show/hide variant info based on whether we're filtering
+            if (!variantId) {
+                showImageVariantInfo(firstImage.variant_id || '0', variantInfo);
+            }
+        }
+    }
+        
     // Quantity controls
     document.getElementById('decreaseQty').addEventListener('click', function() {
         const qtyInput = document.getElementById('quantity');
@@ -1189,46 +1441,32 @@ document.addEventListener('DOMContentLoaded', function() {
     
     document.getElementById('increaseQty').addEventListener('click', function() {
         const qtyInput = document.getElementById('quantity');
-        const maxQty = parseInt(qtyInput.max);
+        const maxQty = 100; // Default max
         if (parseInt(qtyInput.value) < maxQty) {
             qtyInput.value = parseInt(qtyInput.value) + 1;
         }
     });
     
-    // Size selection
-    document.querySelectorAll('.size-selection input[type="radio"]').forEach(radio => {
+    // Variant selection
+    document.querySelectorAll('.variant-option').forEach(radio => {
         radio.addEventListener('change', function() {
-            updateVariantDetails();
-        });
-    });
-    
-    // Color selection
-    document.querySelectorAll('.color-selection input[type="radio"]').forEach(radio => {
-        radio.addEventListener('change', function() {
+            if (this.dataset.type === 'size') {
+                selectedSize = this.value;
+            } else if (this.dataset.type === 'color') {
+                selectedColor = this.value;
+            }
             updateVariantDetails();
         });
     });
     
     // Add to cart button
     document.querySelector('.add-to-cart-btn').addEventListener('click', function() {
-        const productId = this.dataset.productId;
-        const quantity = document.getElementById('quantity').value;
-        const size = document.querySelector('input[name="size"]:checked')?.value;
-        const color = document.querySelector('input[name="color"]:checked')?.value;
-        const material = document.querySelector('select[name="material"]')?.value;
-        
-        addToCart(productId, quantity, size, color, material);
+        addToCartDetail();
     });
     
     // Buy now button
     document.querySelector('.buy-now-btn').addEventListener('click', function() {
-        const productId = this.dataset.productId;
-        const quantity = document.getElementById('quantity').value;
-        const size = document.querySelector('input[name="size"]:checked')?.value;
-        const color = document.querySelector('input[name="color"]:checked')?.value;
-        const material = document.querySelector('select[name="material"]')?.value;
-        
-        addToCart(productId, quantity, size, color, material, true);
+        addToCartDetail(true);
     });
     
     // Rating stars
@@ -1251,73 +1489,625 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
     
-    // Submit review
-    document.getElementById('submitReview')?.addEventListener('click', submitReview);
-    
-    // Load recently viewed products
-    loadRecentlyViewed();
+    // Initialize with default variant if exists
+    const defaultVariant = productData.variants.find(v => v.is_default == 1);
+    if (defaultVariant) {
+        // Check the default variant's options
+        if (defaultVariant.size) {
+            const sizeRadio = document.querySelector(`input[name="size"][value="${defaultVariant.size}"]`);
+            if (sizeRadio && !sizeRadio.disabled) {
+                sizeRadio.checked = true;
+                selectedSize = defaultVariant.size;
+            }
+        }
+        
+        if (defaultVariant.color) {
+            const colorRadio = document.querySelector(`input[name="color"][value="${defaultVariant.color}"]`);
+            if (colorRadio && !colorRadio.disabled) {
+                colorRadio.checked = true;
+                selectedColor = defaultVariant.color;
+            }
+        }
+        
+        // Update variant details
+        setTimeout(updateVariantDetails, 100);
+    }
 });
 
-// Update variant details based on selection
+// Update the updateVariantDetails function to handle price changes
 function updateVariantDetails() {
-    const size = document.querySelector('input[name="size"]:checked')?.value;
-    const color = document.querySelector('input[name="color"]:checked')?.value;
-    
-    if (size && color) {
-        // In a real app, you would fetch variant details from the server
-        const variantDetails = document.getElementById('variantDetails');
-        const variantInfo = document.getElementById('variantInfo');
+    if (selectedSize && selectedColor) {
+        // Find the variant that matches both size and color
+        const variant = findVariant(selectedSize, selectedColor);
         
-        // For now, just show a message
-        variantInfo.innerHTML = `
-            <p class="mb-1"><strong>Size:</strong> ${size}</p>
-            <p class="mb-1"><strong>Color:</strong> ${color}</p>
-            <p class="mb-0"><strong>Availability:</strong> In Stock</p>
-        `;
+        if (variant) {
+            currentVariantId = variant.id;
+            const variantDetails = document.getElementById('variantDetails');
+            const variantInfo = document.getElementById('variantInfo');
+            
+            // Update variant info display
+            document.getElementById('selectedSize').textContent = variant.size || '-';
+            document.getElementById('selectedColor').textContent = variant.color || '-';
+            document.getElementById('selectedSku').textContent = variant.sku;
+            document.getElementById('selectedStock').textContent = variant.stock_quantity + ' available';
+            
+            // Update price if different from base price
+            updatePriceForVariant(variant);
+            
+            variantDetails.style.display = 'block';
+            
+            // Update images based on selected variant
+            updateProductImages(variant.id);
+            
+            // Update quantity max
+            const qtyInput = document.getElementById('quantity');
+            qtyInput.max = Math.min(variant.stock_quantity, 100);
+            
+            // Update add to cart button
+            const addToCartBtn = document.querySelector('.add-to-cart-btn');
+            const buyNowBtn = document.querySelector('.buy-now-btn');
+            
+            if (variant.stock_quantity > 0) {
+                addToCartBtn.disabled = false;
+                addToCartBtn.innerHTML = '<i class="fas fa-shopping-cart me-2"></i> Add to Cart';
+                buyNowBtn.disabled = false;
+            } else {
+                addToCartBtn.disabled = true;
+                addToCartBtn.innerHTML = '<i class="fas fa-shopping-cart me-2"></i> Out of Stock';
+                buyNowBtn.disabled = true;
+            }
+        }
+    } else {
+        // If no specific variant selected, show general images and reset price
+        currentVariantId = null;
+        updateProductImages(null);
         
-        variantDetails.style.display = 'block';
+        // Hide variant details
+        document.getElementById('variantDetails').style.display = 'none';
+        
+        // Reset price to base price
+        resetPriceToBase();
+        
+        // Reset quantity max
+        const qtyInput = document.getElementById('quantity');
+        qtyInput.max = 100;
+        
+        // Update add to cart button based on total stock
+        const totalStock = productData.variants.reduce((sum, v) => sum + v.stock_quantity, 0);
+        const addToCartBtn = document.querySelector('.add-to-cart-btn');
+        const buyNowBtn = document.querySelector('.buy-now-btn');
+        
+        if (totalStock > 0) {
+            addToCartBtn.disabled = false;
+            addToCartBtn.innerHTML = '<i class="fas fa-shopping-cart me-2"></i> Add to Cart';
+            buyNowBtn.disabled = false;
+        } else {
+            addToCartBtn.disabled = true;
+            addToCartBtn.innerHTML = '<i class="fas fa-shopping-cart me-2"></i> Out of Stock';
+            buyNowBtn.disabled = true;
+        }
     }
 }
 
-// Add to cart function
-async function addToCart(productId, quantity, size, color, material, buyNow = false) {
+// Function to update price for selected variant
+function updatePriceForVariant(variant) {
+    const priceElement = document.getElementById('productPrice');
+    const comparePriceContainer = document.getElementById('comparePriceContainer');
+    
+    // Convert price to number if it's a string
+    const variantPrice = parseFloat(variant.price);
+    
+    // Update main price with animation
+    priceElement.classList.add('price-change');
+    setTimeout(() => {
+        priceElement.innerHTML = `Ksh <span class="text-success">${variantPrice.toFixed(2)}</span>`;
+        priceElement.classList.remove('price-change');
+    }, 150);
+    
+    // Update selected price in variant details
+    const selectedPriceElement = document.getElementById('selectedPrice');
+    if (selectedPriceElement) {
+        selectedPriceElement.innerHTML = `Ksh <span class="fw-bold">${variantPrice.toFixed(2)}</span>`;
+    }
+    
+    // Handle compare price
+    updateComparePriceForVariant(variant);
+}
+
+// Function to update compare price
+function updateComparePriceForVariant(variant) {
+    const comparePriceContainer = document.getElementById('comparePriceContainer');
+    
+    // Convert prices to numbers
+    const variantPrice = parseFloat(variant.price);
+    const variantComparePrice = variant.compare_price ? parseFloat(variant.compare_price) : null;
+    const baseComparePrice = productData.baseComparePrice ? parseFloat(productData.baseComparePrice) : null;
+    
+    // Check if variant has compare price
+    if (variantComparePrice && variantComparePrice > variantPrice) {
+        // Show variant-specific compare price
+        comparePriceContainer.innerHTML = `
+            <div class="d-flex align-items-center gap-2" id="comparePriceSection">
+                <span class="text-muted text-decoration-line-through fs-5" id="comparePriceText">
+                    Ksh ${variantComparePrice.toFixed(2)}
+                </span>
+                <span class="badge bg-danger fs-6" id="discountPercentage">
+                    Save ${Math.round(((variantComparePrice - variantPrice) / variantComparePrice) * 100)}%
+                </span>
+            </div>
+        `;
+    } else if (baseComparePrice && baseComparePrice > productData.basePrice) {
+        // Show original product compare price if variant doesn't have one
+        comparePriceContainer.innerHTML = `
+            <div class="d-flex align-items-center gap-2" id="comparePriceSection">
+                <span class="text-muted text-decoration-line-through fs-5" id="comparePriceText">
+                    Ksh ${baseComparePrice.toFixed(2)}
+                </span>
+                <span class="badge bg-danger fs-6" id="discountPercentage">
+                    Save ${Math.round(((baseComparePrice - productData.basePrice) / baseComparePrice) * 100)}%
+                </span>
+            </div>
+        `;
+    } else {
+        // No compare price at all
+        comparePriceContainer.innerHTML = '';
+    }
+}
+// Function to reset price to base product price
+function resetPriceToBase() {
+    const priceElement = document.getElementById('productPrice');
+    const comparePriceContainer = document.getElementById('comparePriceContainer');
+    
+    // Reset to base price with animation
+    priceElement.classList.add('price-change');
+    setTimeout(() => {
+        priceElement.textContent = `Ksh ${productData.basePrice.toFixed(2)}`;
+        priceElement.classList.remove('price-change');
+    }, 150);
+    
+    // Reset selected price in variant details
+    const selectedPriceElement = document.getElementById('selectedPrice');
+    if (selectedPriceElement) {
+        selectedPriceElement.textContent = `Ksh ${productData.basePrice.toFixed(2)}`;
+    }
+    
+    // Reset compare price to original
+    if (productData.baseComparePrice && parseFloat(productData.baseComparePrice) > productData.basePrice) {
+        comparePriceContainer.innerHTML = `
+            <div class="d-flex align-items-center gap-2" id="comparePriceSection">
+                <span class="text-muted text-decoration-line-through fs-5" id="comparePriceText">
+                    Ksh ${parseFloat(productData.baseComparePrice).toFixed(2)}
+                </span>
+                <span class="badge bg-danger fs-6" id="discountPercentage">
+                    Save ${Math.round(((parseFloat(productData.baseComparePrice) - productData.basePrice) / parseFloat(productData.baseComparePrice)) * 100)}%
+                </span>
+            </div>
+        `;
+    } else {
+        comparePriceContainer.innerHTML = '';
+    }
+}
+// Update the highlightCorrespondingVariant function to also update price
+function highlightCorrespondingVariant(variantId, variantInfo) {
+    // Find the variant in our data
+    const variant = productData.variants.find(v => v.id == variantId);
+    
+    if (variant) {
+        // Try to select the corresponding size and color
+        if (variant.size) {
+            const sizeRadio = document.querySelector(`input[name="size"][value="${variant.size}"]`);
+            if (sizeRadio && !sizeRadio.disabled) {
+                sizeRadio.checked = true;
+                selectedSize = variant.size;
+                
+                // Trigger visual selection
+                const sizeOption = sizeRadio.closest('.size-option');
+                if (sizeOption) {
+                    document.querySelectorAll('.size-option .size-btn').forEach(btn => {
+                        btn.classList.remove('btn-dark', 'text-white');
+                        btn.classList.add('btn-outline-dark');
+                    });
+                    
+                    const sizeBtn = sizeOption.querySelector('.size-btn');
+                    if (sizeBtn) {
+                        sizeBtn.classList.remove('btn-outline-dark');
+                        sizeBtn.classList.add('btn-dark', 'text-white');
+                    }
+                }
+            }
+        }
+        
+        if (variant.color) {
+            const colorRadio = document.querySelector(`input[name="color"][value="${variant.color}"]`);
+            if (colorRadio && !colorRadio.disabled) {
+                colorRadio.checked = true;
+                selectedColor = variant.color;
+                
+                // Trigger visual selection
+                const colorOption = colorRadio.closest('.color-option');
+                if (colorOption) {
+                    document.querySelectorAll('.color-option .color-btn').forEach(btn => {
+                        btn.style.border = '1px solid #dee2e6';
+                    });
+                    
+                    const colorBtn = colorOption.querySelector('.color-btn');
+                    if (colorBtn) {
+                        colorBtn.style.border = '3px solid #000';
+                    }
+                }
+            }
+        }
+        
+        // Update price for this variant
+        updatePriceForVariant(variant);
+        
+        // Show variant details
+        const variantDetails = document.getElementById('variantDetails');
+        const variantInfoElement = document.getElementById('variantInfo');
+        
+        if (variantDetails && variantInfoElement) {
+            document.getElementById('selectedSize').textContent = variant.size || '-';
+            document.getElementById('selectedColor').textContent = variant.color || '-';
+            document.getElementById('selectedSku').textContent = variant.sku;
+            document.getElementById('selectedStock').textContent = variant.stock_quantity + ' available';
+            document.getElementById('selectedPrice').innerHTML = `Ksh <span class="fw-bold">${variant.price.toFixed(2)}</span>`;
+            
+            variantDetails.style.display = 'block';
+        }
+        
+        // Update images
+        updateProductImages(variant.id);
+    }
+}
+
+// Update the showImageVariantInfo function to update price
+function showImageVariantInfo(variantId, variantInfo) {
+    const variantInfoElement = document.getElementById('imageVariantInfo');
+    const currentImageVariantElement = document.getElementById('currentImageVariant');
+    
+    if (variantId !== '0' && variantInfo && variantInfo.trim() !== '') {
+        // This image belongs to a specific variant
+        currentImageVariantElement.textContent = variantInfo;
+        
+        // Also highlight the corresponding variant selection and update price
+        highlightCorrespondingVariant(variantId, variantInfo);
+        
+        // Show the variant info badge
+        variantInfoElement.style.display = 'block';
+    } else {
+        // This is a general image (not variant-specific)
+        currentImageVariantElement.textContent = 'General Image - Applies to all variants';
+        variantInfoElement.style.display = 'block';
+        
+        // Reset to base price if clicking on general image
+        resetPriceToBase();
+        
+        // Hide variant details
+        const variantDetails = document.getElementById('variantDetails');
+        if (variantDetails) {
+            variantDetails.style.display = 'none';
+        }
+        
+        // Clear selections
+        selectedSize = null;
+        selectedColor = null;
+        
+        // Reset visual selections
+        document.querySelectorAll('.size-option .size-btn').forEach(btn => {
+            btn.classList.remove('btn-dark', 'text-white');
+            btn.classList.add('btn-outline-dark');
+        });
+        
+        document.querySelectorAll('.color-option .color-btn').forEach(btn => {
+            btn.style.border = '1px solid #dee2e6';
+        });
+        
+        // Uncheck radio buttons
+        document.querySelectorAll('input[name="size"]:checked').forEach(radio => {
+            radio.checked = false;
+        });
+        
+        document.querySelectorAll('input[name="color"]:checked').forEach(radio => {
+            radio.checked = false;
+        });
+    }
+}
+// Find variant by size and color
+function findVariant(size, color) {
+    return productData.variants.find(v => 
+        v.size === size && 
+        v.color === color && 
+        v.stock_quantity > 0
+    );
+}
+
+// Update product images based on variant
+function updateProductImages(variantId) {
+    const thumbnailsContainer = document.getElementById('imageThumbnails');
+    const indicator = document.getElementById('variantImageIndicator');
+    
+    // Clear existing thumbnails
+    thumbnailsContainer.innerHTML = '';
+    
+    let imagesToShow = [];
+    
+    if (variantId && productData.variantImages[variantId]) {
+        // Show variant-specific images first, then general images
+        imagesToShow = [...productData.variantImages[variantId], ...productData.generalImages];
+        indicator.style.display = 'block';
+    } else {
+        // Show only general images
+        imagesToShow = productData.generalImages;
+        indicator.style.display = 'none';
+    }
+    
+    // If no images, show placeholder
+    if (imagesToShow.length === 0) {
+        thumbnailsContainer.innerHTML = `
+            <div class="col-12 text-center text-muted py-2">
+                <i class="fas fa-image fa-lg"></i>
+                <p class="small mt-2">No images available</p>
+            </div>
+        `;
+        return;
+    }
+    
+    // Create thumbnails
+    imagesToShow.forEach((image, index) => {
+        if (index < 8) { // Limit to 8 thumbnails
+            const thumbnail = document.createElement('div');
+            thumbnail.className = `thumbnail ${index === 0 ? 'active' : ''}`;
+            thumbnail.style.cssText = 'width: 80px; height: 80px; cursor: pointer; position: relative;';
+            thumbnail.dataset.image = '<?php echo SITE_URL; ?>' + image.image_url;
+            thumbnail.dataset.variantId = image.variant_id || 'general';
+            
+            thumbnail.innerHTML = `
+                <img src="<?php echo SITE_URL; ?>${image.image_url}" 
+                     alt="<?php echo htmlspecialchars($product['name']); ?> - Image ${index + 1}" 
+                     class="img-fluid rounded border w-100 h-100 object-fit-cover"
+                     onerror="this.onerror=null; this.src='<?php echo SITE_URL; ?>assets/images/placeholder.jpg';">
+                ${image.variant_id ? 
+                    '<div class="variant-badge position-absolute top-0 start-0 bg-info text-white px-1 small">' +
+                    '<i class="fas fa-tag"></i></div>' : ''}
+            `;
+            
+            thumbnail.addEventListener('click', function() {
+                const mainImage = document.getElementById('mainProductImage');
+                mainImage.src = this.dataset.image;
+                
+                document.querySelectorAll('.thumbnail').forEach(t => t.classList.remove('active'));
+                this.classList.add('active');
+            });
+            
+            thumbnailsContainer.appendChild(thumbnail);
+        }
+    });
+    
+    // Update main image to first thumbnail
+    if (imagesToShow.length > 0) {
+        const mainImage = document.getElementById('mainProductImage');
+        mainImage.src = '<?php echo SITE_URL; ?>' + imagesToShow[0].image_url;
+    }
+}
+// Create a handler function that prepares the data properly
+async function handleAddToCart(buyNow = false) {
     try {
+        const quantity = parseInt(document.getElementById('quantity').value) || 1;
+        const size = selectedSize;
+        const color = selectedColor;
+        
+        console.log('DEBUG - Current state:', {
+            productId: productData.id,
+            quantity: quantity,
+            selectedSize: selectedSize,
+            selectedColor: selectedColor,
+            size: size,
+            color: color
+        });
+        
+        // Validate variant selection if variants exist
+        if (productData.variants && productData.variants.length > 0) {
+            if (!size || !color) {
+                showToast('Please select both size and color', 'error');
+                return;
+            }
+            
+            // Find the selected variant
+            const variant = findVariant(size, color);
+            if (!variant) {
+                showToast('Selected variant is not available', 'error');
+                return;
+            }
+            
+            // Check stock
+            if (variant.stock_quantity <= 0) {
+                showToast('This variant is out of stock', 'error');
+                return;
+            }
+            
+            if (quantity > variant.stock_quantity) {
+                showToast(`Only ${variant.stock_quantity} items available`, 'error');
+                return;
+            }
+            
+            console.log('DEBUG - Found variant:', variant);
+        }
+        
+        // Prepare cart data
+        const cartData = {
+            product_id: productData.id,
+            quantity: quantity
+        };
+        
+        // Add variant data if selected
+        if (size && color) {
+            const variant = findVariant(size, color);
+            if (variant && variant.id) {
+                cartData.variant_id = variant.id;
+                cartData.size = size;
+                cartData.color = color;
+                
+                // Add variant-specific price if different
+                if (variant.price && variant.price !== productData.basePrice) {
+                    cartData.price = variant.price;
+                }
+            }
+        }
+        
+        console.log('DEBUG - Final cart data:', cartData);
+        
+        // Show loading state
+        const originalText = this.innerHTML;
+        this.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Adding...';
+        this.disabled = true;
+        
+        // Use a unique function name to avoid conflict with main.js
+        await addProductToCartDetail(cartData, buyNow);
+        
+    } catch (error) {
+        console.error('Handle add to cart error:', error);
+        showToast('Something went wrong. Please try again.', 'error');
+    } finally {
+        // Reset button state
+        const addToCartBtn = document.querySelector('.add-to-cart-btn');
+        const buyNowBtn = document.querySelector('.buy-now-btn');
+        
+        if (addToCartBtn) {
+            addToCartBtn.innerHTML = '<i class="fas fa-shopping-cart me-2"></i>Add to Cart';
+            addToCartBtn.disabled = false;
+        }
+        
+        if (buyNowBtn) {
+            buyNowBtn.innerHTML = '<i class="fas fa-bolt me-2"></i>Buy Now';
+            buyNowBtn.disabled = false;
+        }
+    }
+}
+
+async function addToCartDetail(buyNow = false) {
+    try {
+        const productId = productData.id;
+        const quantity = parseInt(document.getElementById('quantity').value) || 1;
+        const size = selectedSize;
+        const color = selectedColor;
+        
+        console.log('Add to cart details:', {
+            productId: productId,
+            quantity: quantity,
+            size: size,
+            color: color
+        });
+        
+        // Validate product ID
+        if (!productId) {
+            showToast('Product ID is required', 'error');
+            return;
+        }
+        
+        // For products with variants, validate selection
+        if (productData.variants && productData.variants.length > 0) {
+            if (!size || !color) {
+                showToast('Please select both size and color', 'error');
+                return;
+            }
+            
+            // Find the selected variant
+            const variant = findVariant(size, color);
+            if (!variant) {
+                showToast('Selected variant is not available', 'error');
+                return;
+            }
+            
+            // Check stock
+            if (variant.stock_quantity <= 0) {
+                showToast('This variant is out of stock', 'error');
+                return;
+            }
+            
+            if (quantity > variant.stock_quantity) {
+                showToast(`Only ${variant.stock_quantity} items available`, 'error');
+                return;
+            }
+        }
+        
+        // Prepare cart data
+        const cartData = {
+            product_id: productId,
+            quantity: quantity,
+            size: size,
+            color: color
+        };
+        
+        // Add variant ID if available
+        if (currentVariantId) {
+            cartData.variant_id = currentVariantId;
+        }
+        
+        // Show loading state
+        const addToCartBtn = document.querySelector('.add-to-cart-btn');
+        const buyNowBtn = document.querySelector('.buy-now-btn');
+        
+        const originalText = addToCartBtn.innerHTML;
+        const originalBuyNowText = buyNowBtn.innerHTML;
+        
+        addToCartBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Adding...';
+        addToCartBtn.disabled = true;
+        buyNowBtn.disabled = true;
+        
+        // Send request to server
         const response = await fetch('<?php echo SITE_URL; ?>ajax/add-to-cart.php', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'X-Requested-With': 'XMLHttpRequest'
             },
-            body: JSON.stringify({
-                product_id: productId,
-                quantity: quantity,
-                size: size,
-                color: color,
-                material: material
-            })
+            body: JSON.stringify(cartData)
         });
+        
+        // First check if response is JSON
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            const text = await response.text();
+            console.error('Non-JSON response:', text.substring(0, 200));
+            throw new Error('Server returned non-JSON response');
+        }
         
         const data = await response.json();
         
         if (data.success) {
-            // Update cart count
-            updateCartCount(data.cart_count);
-            
-            // Show success toast
             showToast('Product added to cart successfully!');
             
+            // Update cart count
+            if (data.cart_count !== undefined) {
+                updateCartCount(data.cart_count);
+            }
+            
             if (buyNow) {
-                // Redirect to checkout
                 setTimeout(() => {
                     window.location.href = '<?php echo SITE_URL; ?>cart/checkout';
                 }, 1000);
             }
         } else {
-            showToast(data.message || 'Failed to add product to cart', 'error');
+            throw new Error(data.message || 'Failed to add to cart');
         }
+        
     } catch (error) {
         console.error('Add to cart error:', error);
-        showToast('Something went wrong. Please try again.', 'error');
+        showToast(error.message || 'Something went wrong. Please try again.', 'error');
+    } finally {
+        // Reset button state
+        const addToCartBtn = document.querySelector('.add-to-cart-btn');
+        const buyNowBtn = document.querySelector('.buy-now-btn');
+        
+        if (addToCartBtn) {
+            addToCartBtn.innerHTML = '<i class="fas fa-shopping-cart me-2"></i>Add to Cart';
+            addToCartBtn.disabled = false;
+        }
+        
+        if (buyNowBtn) {
+            buyNowBtn.innerHTML = '<i class="fas fa-bolt me-2"></i>Buy Now';
+            buyNowBtn.disabled = false;
+        }
     }
 }
 
@@ -1344,8 +2134,9 @@ function showToast(message, type = 'success') {
     toast.show();
 }
 
-// Submit review
 
+
+// Submit review
 async function submitReview() {
     const form = document.getElementById('reviewForm');
     const submitBtn = document.getElementById('submitReview');
@@ -1383,21 +2174,18 @@ async function submitReview() {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                product_id: <?php echo $product['id']; ?>,
+                product_id: productData.id,
                 rating: rating.value,
                 title: title.trim(),
                 review: review.trim()
             })
         });
         
-        console.log('Response status:', response.status);
-        
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         
         const data = await response.json();
-        console.log('API response:', data);
         
         if (data.success) {
             showToast(data.message, 'success');
@@ -1434,334 +2222,6 @@ async function submitReview() {
         submitBtn.innerHTML = originalText;
         submitBtn.disabled = false;
     }
-}
-
-// Load reviews for the product
-async function loadProductReviews() {
-    const container = document.getElementById('reviewsList');
-    if (!container) return;
-    
-    const productId = <?php echo $product['id']; ?>;
-    
-    // Show loading
-    container.innerHTML = '<div class="text-center py-3"><div class="spinner-border text-dark" role="status"></div><p class="mt-2 text-muted">Loading reviews...</p></div>';
-    
-    try {
-        const response = await fetch(`<?php echo SITE_URL; ?>ajax/get-reviews.php?product_id=${productId}&limit=4`);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const data = await response.json();
-        
-        if (data.success && data.reviews && data.reviews.length > 0) {
-            displayReviews(data.reviews, container);
-        } else {
-            container.innerHTML = `
-                <div class="text-center py-5">
-                    <i class="fas fa-comments fa-3x text-muted mb-3"></i>
-                    <h5 class="fw-bold mb-3">No Reviews Yet</h5>
-                    <p class="text-muted">Be the first to review this product!</p>
-                    <button class="btn btn-dark" data-bs-toggle="modal" data-bs-target="#writeReviewModal">
-                        <i class="fas fa-pen me-2"></i> Write First Review
-                    </button>
-                </div>
-            `;
-        }
-        
-    } catch (error) {
-        console.error('Error loading reviews:', error);
-        container.innerHTML = '<p class="text-muted">Could not load reviews.</p>';
-    }
-}
-
-// Display reviews
-function displayReviews(reviews, container) {
-    if (!reviews || reviews.length === 0) {
-        container.innerHTML = '<p class="text-muted">No reviews found.</p>';
-        return;
-    }
-    
-    let html = '<div class="row g-4">';
-    
-    reviews.forEach(review => {
-        const date = new Date(review.created_at).toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric'
-        });
-        
-        // Get user initials
-        let initials = 'U';
-        if (review.full_name) {
-            const nameParts = review.full_name.split(' ');
-            if (nameParts.length >= 2) {
-                initials = (nameParts[0].charAt(0) + nameParts[1].charAt(0)).toUpperCase();
-            } else {
-                initials = nameParts[0].substring(0, 2).toUpperCase();
-            }
-        }
-        
-        html += `
-            <div class="col-md-6">
-                <div class="card border-0 shadow-sm h-100">
-                    <div class="card-body">
-                        <div class="d-flex align-items-center mb-3">
-                            <div class="bg-dark text-white rounded-circle d-flex align-items-center justify-content-center me-3" 
-                                 style="width: 40px; height: 40px;">
-                                ${initials}
-                            </div>
-                            <div>
-                                <h6 class="mb-1 fw-bold">${review.full_name || 'Anonymous'}</h6>
-                                <small class="text-muted">${date}</small>
-                            </div>
-                        </div>
-                        
-                        <div class="rating mb-3">
-                            ${Array.from({length: 5}, (_, i) => 
-                                `<i class="fas fa-star ${i < review.rating ? 'text-warning' : 'text-muted'}"></i>`
-                            ).join('')}
-                        </div>
-                        
-                        ${review.title ? `<h6 class="fw-bold mb-2">${review.title}</h6>` : ''}
-                        
-                        <p class="mb-0 text-truncate-3" style="max-height: 4.5em; overflow: hidden;">
-                            ${review.review}
-                        </p>
-                        
-                        <div class="mt-3 pt-3 border-top">
-                            <small class="text-muted">
-                                <i class="fas fa-thumbs-up me-1"></i> Helpful? 
-                                <a href="#" class="text-decoration-none ms-2">Yes</a> • 
-                                <a href="#" class="text-decoration-none">No</a>
-                            </small>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-    });
-    
-    html += '</div>';
-    container.innerHTML = html;
-}
-
-// Load all reviews (scrolls to reviews tab)
-function loadAllReviews() {
-    // Scroll to reviews section
-    const reviewsTab = document.getElementById('reviews-tab');
-    if (reviewsTab) {
-        reviewsTab.click();
-        window.scrollTo({
-            top: document.getElementById('reviews').offsetTop - 100,
-            behavior: 'smooth'
-        });
-    }
-}
-
-// Initialize on page load
-document.addEventListener('DOMContentLoaded', function() {
-    // Load product reviews
-    loadProductReviews();
-    
-    // Keep recently viewed functionality in localStorage for future use
-    // But don't display it
-    const currentProductId = <?php echo $product['id']; ?>;
-    let recentlyViewed = JSON.parse(localStorage.getItem('recentlyViewed') || '[]');
-    recentlyViewed = recentlyViewed.filter(id => id !== currentProductId);
-    recentlyViewed.unshift(currentProductId);
-    recentlyViewed = recentlyViewed.slice(0, 8);
-    localStorage.setItem('recentlyViewed', JSON.stringify(recentlyViewed));
-});
-// Display recently viewed products
-function displayRecentlyViewedProducts(products, container) {
-    if (!products || products.length === 0) {
-        container.innerHTML = '<p class="text-muted">No recently viewed products.</p>';
-        return;
-    }
-    
-    let html = '<div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 g-4">';
-    
-    // Limit to 4 products
-    products.slice(0, 4).forEach(product => {
-        const imageUrl = product.image_url 
-            ? '<?php echo SITE_URL; ?>' + product.image_url 
-            : '<?php echo SITE_URL; ?>assets/images/placeholder.jpg';
-        
-        const productUrl = '<?php echo SITE_URL; ?>products/detail.php?slug=' + product.slug;
-        const inStock = product.stock_quantity > 0;
-        const hasDiscount = product.original_price_numeric && product.original_price_numeric > product.price_numeric;
-        const discountPercent = hasDiscount 
-            ? Math.round(((product.original_price_numeric - product.price_numeric) / product.original_price_numeric) * 100)
-            : 0;
-        
-        html += `
-            <div class="col">
-                <div class="card h-100 product-card border-0 shadow-sm hover-lift">
-                    <div class="position-relative overflow-hidden" style="height: 200px;">
-                        <a href="${productUrl}" class="text-decoration-none">
-                            <img src="${imageUrl}" 
-                                 class="card-img-top h-100 w-100 object-fit-cover" 
-                                 alt="${product.name}"
-                                 onerror="this.onerror=null; this.src='<?php echo SITE_URL; ?>assets/images/placeholder.jpg';">
-                            ${!inStock ? `
-                                <div class="position-absolute top-0 start-0 w-100 h-100 bg-dark bg-opacity-50 d-flex align-items-center justify-content-center">
-                                    <span class="badge bg-secondary">Out of Stock</span>
-                                </div>
-                            ` : ''}
-                        </a>
-                        
-                        <!-- Badges -->
-                        <div class="position-absolute top-0 start-0 m-2">
-                            ${!inStock ? `<span class="badge bg-secondary">Out of Stock</span>` : ''}
-                            ${hasDiscount ? `<span class="badge bg-danger">-${discountPercent}%</span>` : ''}
-                            ${product.rating >= 4.5 ? `<span class="badge bg-warning text-dark"><i class="fas fa-star me-1"></i> ${product.rating.toFixed(1)}</span>` : ''}
-                        </div>
-                        
-                        <div class="position-absolute top-0 end-0 m-2">
-                            <button type="button" class="btn btn-light btn-sm rounded-circle shadow-sm add-to-wishlist" 
-                                    data-product-id="${product.id}">
-                                <i class="far fa-heart"></i>
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <div class="card-body d-flex flex-column">
-                        <div class="mb-2">
-                            <small class="text-muted">${product.category || 'Uncategorized'}</small>
-                        </div>
-                        
-                        <h6 class="card-title fw-bold mb-2">
-                            <a href="${productUrl}" class="text-decoration-none text-dark text-truncate-2">
-                                ${product.name}
-                            </a>
-                        </h6>
-                        
-                        ${product.rating > 0 ? `
-                            <div class="rating mb-2">
-                                ${Array.from({length: 5}, (_, i) => {
-                                    const starClass = i < Math.floor(product.rating) ? 'fas fa-star text-warning' : 
-                                                     i < product.rating ? 'fas fa-star-half-alt text-warning' : 'far fa-star text-muted';
-                                    return `<i class="${starClass}"></i>`;
-                                }).join('')}
-                                <small class="text-muted ms-1">(${product.review_count || 0})</small>
-                            </div>
-                        ` : ''}
-                        
-                        <div class="mt-auto">
-                            <div class="d-flex justify-content-between align-items-center">
-                                <div>
-                                    <h5 class="text-dark mb-0">Ksh ${product.price_numeric.toFixed(2)}</h5>
-                                    ${hasDiscount ? `
-                                        <small class="text-muted text-decoration-line-through">
-                                            Ksh ${product.original_price_numeric.toFixed(2)}
-                                        </small>
-                                    ` : ''}
-                                </div>
-                                ${inStock ? `
-                                    <button type="button" 
-                                            class="btn btn-sm btn-outline-dark add-to-cart-btn"
-                                            data-product-id="${product.id}">
-                                        <i class="fas fa-cart-plus"></i>
-                                    </button>
-                                ` : `
-                                    <span class="badge bg-secondary">Out of Stock</span>
-                                `}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-    });
-    
-    html += '</div>';
-    container.innerHTML = html;
-    
-    // Add event listeners to new buttons
-    addRecentlyViewedEventListeners();
-}
-
-// Add event listeners to recently viewed products
-function addRecentlyViewedEventListeners() {
-    // Add to cart buttons
-    document.querySelectorAll('#recentlyViewed .add-to-cart-btn').forEach(button => {
-        button.addEventListener('click', function(e) {
-            e.preventDefault();
-            const productId = this.dataset.productId;
-            addToCart(productId, 1);
-        });
-    });
-    
-    // Add to wishlist buttons
-    document.querySelectorAll('#recentlyViewed .add-to-wishlist').forEach(button => {
-        button.addEventListener('click', function(e) {
-            e.preventDefault();
-            const productId = this.dataset.productId;
-            addToWishlist(productId);
-        });
-    });
-}
-
-// Save current product to recently viewed - UPDATED VERSION
-function updateRecentlyViewed() {
-    const currentProductId = <?php echo $product['id']; ?>;
-    let recentlyViewed = JSON.parse(localStorage.getItem('recentlyViewed') || '[]');
-    
-    // Remove if already exists
-    recentlyViewed = recentlyViewed.filter(id => id !== currentProductId);
-    
-    // Add to beginning
-    recentlyViewed.unshift(currentProductId);
-    
-    // Keep only last 8 products (to have more for display filtering)
-    recentlyViewed = recentlyViewed.slice(0, 8);
-    
-    // Save back to localStorage
-    localStorage.setItem('recentlyViewed', JSON.stringify(recentlyViewed));
-    
-    // Update the display if container exists
-    const container = document.getElementById('recentlyViewed');
-    if (container && container.querySelector('.spinner-border')) {
-        // If still loading, wait a bit then reload
-        setTimeout(() => {
-            loadRecentlyViewed();
-        }, 500);
-    }
-    
-    console.log('Recently updated:', recentlyViewed);
-    return recentlyViewed;
-}
-
-// Initialize on page load
-document.addEventListener('DOMContentLoaded', function() {
-    // Update recently viewed
-    updateRecentlyViewed();
-    
-    // Load recently viewed products after a short delay
-    setTimeout(() => {
-        loadRecentlyViewed();
-    }, 100);
-});
-
-// Helper functions (you should have these in your file)
-function addToCart(productId, quantity) {
-    // Your existing addToCart function
-    console.log('Add to cart:', productId, quantity);
-    // Implement your add to cart logic here
-    showToast('Product added to cart!', 'success');
-}
-
-function addToWishlist(productId) {
-    console.log('Add to wishlist:', productId);
-    showToast('Product added to wishlist!', 'success');
-    // Implement your wishlist logic here
-}
-
-function showToast(message, type = 'success') {
-    // Your existing toast function
-    console.log('Toast:', type, message);
 }
 </script>
 

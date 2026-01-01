@@ -1,144 +1,81 @@
 <?php
-// /linen-closet/ajax/remove-from-cart.php - PRODUCTION VERSION
+// /linen-closet/ajax/remove-from-cart.php - UPDATED
 
-ini_set('display_errors', 0);
-error_reporting(E_ALL);
-ini_set('log_errors', 1);
-ob_start();
+session_start();
+header('Content-Type: application/json');
 
-header('Content-Type: application/json; charset=utf-8');
+$response = ['success' => false, 'message' => ''];
 
 try {
-    // Include files
-    require_once __DIR__ . '/../includes/config.php';
-    require_once __DIR__ . '/../includes/Database.php';
-    require_once __DIR__ . '/../includes/App.php';
-    
-    // Validate request
-    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        throw new Exception('POST method required');
-    }
-    
-    // Start session
-    if (session_status() === PHP_SESSION_NONE) {
-        session_start();
-    }
-    
     // Get input
     $input = json_decode(file_get_contents('php://input'), true);
     
-    if ($input === null) {
-        throw new Exception('Invalid JSON data');
+    if (!$input) {
+        throw new Exception('Invalid request data');
     }
     
-    $productId = isset($input['product_id']) ? (int)$input['product_id'] : 0;
+    $cartKey = $input['cart_key'] ?? null;
     
-    if ($productId <= 0) {
-        throw new Exception('Invalid product ID');
+    if (!$cartKey) {
+        throw new Exception('Cart key is required');
     }
     
-    // Initialize cart
+    // Initialize cart if not exists
     if (!isset($_SESSION['cart'])) {
         $_SESSION['cart'] = [];
     }
     
-    // Get database connection
-    $app = new App();
-    $db = $app->getDB();
-    
-    if (!$db) {
-        throw new Exception('Database connection failed');
-    }
-    
     // Remove item from cart
-    $removed = false;
-    if (isset($_SESSION['cart'][$productId])) {
-        unset($_SESSION['cart'][$productId]);
-        $removed = true;
-    }
-    
-    if ($removed) {
-        // Get updated cart summary
-        $cartSummary = getCartSummary($_SESSION['cart'], $db);
+    if (isset($_SESSION['cart'][$cartKey])) {
+        unset($_SESSION['cart'][$cartKey]);
         
-        echo json_encode([
-            'success' => true,
-            'message' => 'Item removed from cart',
-            'cart' => $cartSummary
-        ]);
-    } else {
-        echo json_encode([
-            'success' => false,
-            'message' => 'Item not found in cart'
-        ]);
-    }
-    
-} catch (Exception $e) {
-    error_log("Remove from Cart Error: " . $e->getMessage());
-    http_response_code(400);
-    echo json_encode([
-        'success' => false,
-        'message' => $e->getMessage()
-    ]);
-}
-
-function getCartSummary($cart, $db) {
-    if (empty($cart)) {
-        return [
-            'count' => 0,
-            'subtotal' => 0,
-            'shipping' => 0,
-            'tax' => 0,
-            'total' => 0,
-            'items' => []
-        ];
-    }
-    
-    $cartCount = count($cart);
-    $subtotal = 0;
-    $items = [];
-    
-    $productIds = array_keys($cart);
-    $placeholders = str_repeat('?,', count($productIds) - 1) . '?';
-    
-    $stmt = $db->prepare("SELECT id, price FROM products WHERE id IN ($placeholders) AND is_active = 1");
-    $stmt->execute($productIds);
-    $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    $prices = [];
-    foreach ($products as $product) {
-        $prices[$product['id']] = $product['price'];
-    }
-    
-    foreach ($cart as $id => $item) {
-        if (isset($prices[$id])) {
-            $price = $prices[$id];
+        // Count cart items and prepare items array
+        $cartCount = 0;
+        $subtotal = 0;
+        $items = [];
+        
+        foreach ($_SESSION['cart'] as $key => $item) {
             $quantity = $item['quantity'] ?? 1;
+            $price = $item['price'] ?? 0;
             $itemTotal = $price * $quantity;
+            
+            $cartCount += $quantity;
             $subtotal += $itemTotal;
             
             $items[] = [
-                'id' => $id,
+                'cart_key' => $key,
                 'quantity' => $quantity,
                 'price' => $price,
-                'total' => $itemTotal
+                'total' => $itemTotal,
+                'size' => $item['size'] ?? null,
+                'color' => $item['color'] ?? null,
+                'material' => $item['material'] ?? null,
+                'variant_id' => $item['variant_id'] ?? null
             ];
         }
+        
+        $shipping = ($subtotal >= 5000) ? 0 : 300;
+        $tax = $subtotal * 0.16;
+        $total = $subtotal + $shipping + $tax;
+        
+        $response['success'] = true;
+        $response['message'] = 'Item removed from cart';
+        $response['cart'] = [
+            'count' => $cartCount,
+            'subtotal' => round($subtotal, 2),
+            'shipping' => round($shipping, 2),
+            'tax' => round($tax, 2),
+            'total' => round($total, 2),
+            'items' => $items // Make sure items array is included
+        ];
+    } else {
+        $response['message'] = 'Item not found in cart';
     }
     
-    $shipping = ($subtotal >= 5000) ? 0 : 300;
-    $tax = $subtotal * 0.16;
-    $total = $subtotal + $shipping + $tax;
-    
-    return [
-        'count' => $cartCount,
-        'subtotal' => round($subtotal, 2),
-        'shipping' => round($shipping, 2),
-        'tax' => round($tax, 2),
-        'total' => round($total, 2),
-        'items' => $items
-    ];
+} catch (Exception $e) {
+    http_response_code(400);
+    $response['message'] = $e->getMessage();
 }
 
-ob_end_flush();
-?>
+echo json_encode($response);
+exit;
