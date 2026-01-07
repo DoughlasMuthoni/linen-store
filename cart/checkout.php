@@ -10,7 +10,8 @@ require_once __DIR__ . '/../includes/Database.php';
 require_once __DIR__ . '/../includes/App.php';
 require_once __DIR__ . '/../includes/Shipping.php';
 require_once __DIR__ . '/../includes/NotificationHelper.php';
-
+require_once __DIR__ . '/../includes/TaxHelper.php';
+require_once __DIR__ . '/../includes/PHPMailerEmail.php';
 $app = new App();
 $db = $app->getDB();
 
@@ -127,7 +128,7 @@ foreach ($products as $product) {
     }
 }
 
-// Calculate shipping cost based on county (since your Shipping class uses county-based calculation)
+// Calculate INITIAL shipping cost based on county (will be updated by JavaScript)
 $shippingInfo = $shippingHelper->calculateShipping($userCounty, $subtotal);
 
 $shipping = $shippingInfo['cost'];
@@ -146,7 +147,16 @@ if ($shippingZoneId) {
     }
 }
 
-$tax = $subtotal * 0.16;
+// Get tax settings
+$taxSettings = TaxHelper::getTaxSettings($db);
+
+// Calculate tax based on settings
+if ($taxSettings['enabled'] == '1') {
+    $tax = $subtotal * ($taxSettings['rate'] / 100);
+} else {
+    $tax = 0;
+}
+
 $total = $subtotal + $shipping + $tax;
 
 // Fetch user data - try App method first, then fallback to database
@@ -191,10 +201,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'Please select or enter a shipping address';
     }
     
-    // Validate shipping zone
-    // if (empty($_POST['shipping_zone_id'])) {
-    //     $errors[] = 'Please select a shipping zone';
-    // }
     // Validate town/area
     if (empty($_POST['shipping_town_area'])) {
         $errors[] = 'Please select a town/area';
@@ -205,82 +211,120 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'Please select a payment method';
     }
     
+    // Validate shipping fields
+    if (!isset($_POST['shipping_cost']) || $_POST['shipping_cost'] === '') {
+        $errors[] = 'Shipping cost not calculated. Please select a county/town.';
+    }
+    
+    if (empty($_POST['new_shipping_address']['county'])) {
+        $errors[] = 'Please select a county';
+    }
+    
     if (empty($errors)) {
         // Create order
         try {
             $db->beginTransaction();
             
-           // ========== Determine shipping address ==========
-    if (!empty($_POST['shipping_address_id'])) {
-        // Use saved address
-        $addressId = intval($_POST['shipping_address_id']);
-        $addressStmt = $db->prepare("SELECT * FROM user_addresses WHERE id = ? AND user_id = ?");
-        $addressStmt->execute([$addressId, $user['id']]);
-        $savedAddress = $addressStmt->fetch(PDO::FETCH_ASSOC);
-        
-        if ($savedAddress) {
-            $shippingAddress = implode(', ', array_filter([
-                $savedAddress['full_name'],
-                $savedAddress['address_line1'],
-                $savedAddress['address_line2'],
-                $savedAddress['city'],
-                $savedAddress['state'],
-                $savedAddress['postal_code'],
-                $savedAddress['country']
-            ]));
+            // DEBUG: Log POST data
+            error_log("=== CHECKOUT FORM SUBMISSION ===");
+            error_log("Shipping cost from POST: " . ($_POST['shipping_cost'] ?? 'NOT SET'));
+            error_log("Shipping zone from POST: " . ($_POST['shipping_zone_id'] ?? 'NOT SET'));
+            error_log("County from POST: " . ($_POST['new_shipping_address']['county'] ?? 'NOT SET'));
+            error_log("Town/Area from POST: " . ($_POST['shipping_town_area'] ?? 'NOT SET'));
+            error_log("=== END DEBUG ===");
             
-            // Get county from saved address or new input
-            $county = $savedAddress['county'] ?? ($_POST['new_shipping_address']['county'] ?? 'Nairobi');
-        }
-    } else {
-        // Use new address
-        $addr = $_POST['new_shipping_address'];
-        $shippingAddress = implode(', ', array_filter([
-            $addr['full_name'],
-            $addr['address_line1'],
-            $addr['address_line2'],
-            $addr['city'],
-            $addr['state'],
-            $addr['postal_code'],
-            $addr['country']
-        ]));
-        
-        $county = $addr['county'] ?? 'Nairobi';
-        
-        // Save new address to user_addresses table if checkbox is checked
-        if (isset($_POST['save_new_address']) && $_POST['save_new_address'] == '1') {
-            $saveAddressStmt = $db->prepare("
-                INSERT INTO user_addresses 
-                (user_id, address_title, full_name, address_line1, address_line2, 
-                city, state, postal_code, country, county, phone, email)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ");
+            // ========== Determine shipping address ==========
+            if (!empty($_POST['shipping_address_id'])) {
+                // Use saved address
+                $addressId = intval($_POST['shipping_address_id']);
+                $addressStmt = $db->prepare("SELECT * FROM user_addresses WHERE id = ? AND user_id = ?");
+                $addressStmt->execute([$addressId, $user['id']]);
+                $savedAddress = $addressStmt->fetch(PDO::FETCH_ASSOC);
+                
+                if ($savedAddress) {
+                    $shippingAddress = implode(', ', array_filter([
+                        $savedAddress['full_name'],
+                        $savedAddress['address_line1'],
+                        $savedAddress['address_line2'],
+                        $savedAddress['city'],
+                        $savedAddress['state'],
+                        $savedAddress['postal_code'],
+                        $savedAddress['country']
+                    ]));
+                    
+                    // Get county from saved address or new input
+                    $county = $savedAddress['county'] ?? ($_POST['new_shipping_address']['county'] ?? 'Nairobi');
+                }
+            } else {
+                // Use new address
+                $addr = $_POST['new_shipping_address'];
+                $shippingAddress = implode(', ', array_filter([
+                    $addr['full_name'],
+                    $addr['address_line1'],
+                    $addr['address_line2'],
+                    $addr['city'],
+                    $addr['state'],
+                    $addr['postal_code'],
+                    $addr['country']
+                ]));
+                
+                $county = $addr['county'] ?? 'Nairobi';
+                
+                // Save new address to user_addresses table if checkbox is checked
+                if (isset($_POST['save_new_address']) && $_POST['save_new_address'] == '1') {
+                    $saveAddressStmt = $db->prepare("
+                        INSERT INTO user_addresses 
+                        (user_id, address_title, full_name, address_line1, address_line2, 
+                        city, state, postal_code, country, county, phone, email)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ");
+                    
+                    $addressTitle = 'Address from ' . date('M j, Y');
+                    $saveAddressStmt->execute([
+                        $user['id'],
+                        $addressTitle,
+                        $addr['full_name'],
+                        $addr['address_line1'],
+                        $addr['address_line2'] ?? '',
+                        $addr['city'],
+                        $addr['state'],
+                        $addr['postal_code'],
+                        $addr['country'],
+                        $county,
+                        $addr['phone'] ?? ($user['phone'] ?? ''),
+                        $addr['email'] ?? ($user['email'] ?? '')
+                    ]);
+                }
+            }
             
-            $addressTitle = 'Address from ' . date('M j, Y');
-            $saveAddressStmt->execute([
-                $user['id'],
-                $addressTitle,
-                $addr['full_name'],
-                $addr['address_line1'],
-                $addr['address_line2'] ?? '',
-                $addr['city'],
-                $addr['state'],
-                $addr['postal_code'],
-                $addr['country'],
-                $county,
-                $addr['phone'] ?? ($user['phone'] ?? ''),
-                $addr['email'] ?? ($user['email'] ?? '')
-            ]);
-        }
-    }
-            
-            // Get shipping info from POST
+            // CRITICAL: Get shipping info from POST data (JavaScript updated values)
             $shippingZoneId = $_POST['shipping_zone_id'] ?? null;
-            $shippingCost = $_POST['shipping_cost'] ?? 0;
+            $shippingCost = floatval($_POST['shipping_cost'] ?? $shipping); // Use POST value
             $shippingMessage = $_POST['shipping_message'] ?? 'Standard shipping';
             $shippingTownArea = $_POST['shipping_town_area'] ?? '';
-
-            // Insert order with shipping zone info
+            
+            // Get county from POST
+            $county = $_POST['new_shipping_address']['county'] ?? $userCounty;
+            
+            // Calculate FINAL tax amount based on current settings
+            if ($taxSettings['enabled'] == '1') {
+                $finalTaxAmount = $subtotal * ($taxSettings['rate'] / 100);
+            } else {
+                $finalTaxAmount = 0;
+            }
+            
+            // Calculate FINAL total to ensure consistency
+            $finalTotal = $subtotal + $shippingCost + $finalTaxAmount;
+            
+            // Verify our calculations
+            if (abs($total - $finalTotal) > 0.01) {
+                error_log("WARNING: Total mismatch, using recalculated total");
+                error_log("  Original total: " . $total);
+                error_log("  Recalculated total: " . $finalTotal);
+                $total = $finalTotal;
+            }
+            
+            // Insert order with shipping zone and tax info
             $orderStmt = $db->prepare("
                 INSERT INTO orders (
                     order_number, 
@@ -295,28 +339,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     billing_address,
                     status, 
                     payment_method, 
-                    payment_status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    payment_status,
+                    tax_amount,
+                    tax_rate,
+                    tax_enabled,
+                    tax_number
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
-
+            
             $orderNumber = 'ORD-' . date('Ymd') . '-' . strtoupper(substr(uniqid(), -8));
             $status = 'pending';
             $payment_status = 'pending';
-
+            
             $orderStmt->execute([
                 $orderNumber,
                 $user['id'] ?? 0,
-                $total,
+                $finalTotal,
                 $shippingAddress,
-                $county,                // shipping_county
-                $shippingTownArea,      // shipping_town_area
-                $shippingZoneId,        // shipping_zone_id
-                $shippingCost,          // shipping_cost
-                $shippingMessage,       // shipping_message
-                $shippingAddress,       // billing_address
+                $county,
+                $shippingTownArea,
+                $shippingZoneId,
+                $shippingCost,
+                $shippingMessage,
+                $shippingAddress,
                 $status,
                 $_POST['payment_method'],
-                $payment_status
+                $payment_status,
+                $finalTaxAmount,
+                $taxSettings['rate'],
+                $taxSettings['enabled'],
+                $taxSettings['tax_number'] ?? ''
             ]);
             
             $orderId = $db->lastInsertId();
@@ -324,38 +376,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $db,
                 $orderId,
                 $orderNumber,
-                'pending', // initial status
+                'pending',
                 $_POST['payment_method'],
-                $total
-            );
-
-          // ========== ADD ORDER NOTIFICATION ==========
-        try {
-            $customerName = ($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? '');
-            $customerName = trim($customerName) ?: 'Customer';
-            
-            // Use NotificationHelper to create order notification
-            NotificationHelper::createOrderNotification(
-                $db,
-                $orderId,
-                $orderNumber,
-                $customerName
+                $finalTotal
             );
             
-            // Also create a notification for the customer
-            NotificationHelper::create(
-                $db,
-                $user['id'] ?? 0,
-                'order',
-                'Order Confirmed',
-                'Your order #' . $orderNumber . ' has been received',
-                '/orders/view.php?id=' . $orderId
-            );
-            
-        } catch (Exception $e) {
-            error_log('Order notification error: ' . $e->getMessage());
-        }
-        // ========== END ORDER NOTIFICATION ==========
+            // ========== ADD ORDER NOTIFICATION ==========
+            try {
+                $customerName = ($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? '');
+                $customerName = trim($customerName) ?: 'Customer';
+                
+                // Use NotificationHelper to create order notification
+                NotificationHelper::createOrderNotification(
+                    $db,
+                    $orderId,
+                    $orderNumber,
+                    $customerName
+                );
+                
+                // Also create a notification for the customer
+                NotificationHelper::create(
+                    $db,
+                    $user['id'] ?? 0,
+                    'order',
+                    'Order Confirmed',
+                    'Your order #' . $orderNumber . ' has been received',
+                    '/orders/view.php?id=' . $orderId
+                );
+                
+            } catch (Exception $e) {
+                error_log('Order notification error: ' . $e->getMessage());
+            }
+            // ========== END ORDER NOTIFICATION ==========
             
             if ($orderId) {
                 // Store in session for confirmation page
@@ -371,8 +423,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ");
                 
-            $itemsInserted = 0;
-            foreach ($cartItems as $item) {
+                $itemsInserted = 0;
+                foreach ($cartItems as $item) {
                     $product = $item['product'];
                     $orderItemStmt->execute([
                         $orderId,
@@ -396,31 +448,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         WHERE id = ?
                     ");
                     $updateStmt->execute([$item['quantity'], $item['quantity'], $product['id']]);
-                                // ========== STOCK NOTIFICATION ==========
-                                try {
-                                    // Calculate new stock
-                                    $newStock = (int)$product['stock_quantity'] - (int)$item['quantity'];
-                                    $minStock = (int)$product['min_stock_level'];
-                                    
-                                    // Create stock notification
-                                    NotificationHelper::createStockNotification(
-                                        $db,
-                                        $product['id'],
-                                        $product['name'],
-                                        $newStock,
-                                        $minStock
-                                    );
-                                    
-                                } catch (Exception $e) {
-                                    error_log('Stock notification error: ' . $e->getMessage());
-                                }
-                                // ========== END STOCK NOTIFICATION ==========
-                                }
+                    
+                    // ========== STOCK NOTIFICATION ==========
+                    try {
+                        // Calculate new stock
+                        $newStock = (int)$product['stock_quantity'] - (int)$item['quantity'];
+                        $minStock = (int)$product['min_stock_level'];
+                        
+                        // Create stock notification
+                        NotificationHelper::createStockNotification(
+                            $db,
+                            $product['id'],
+                            $product['name'],
+                            $newStock,
+                            $minStock
+                        );
+                        
+                    } catch (Exception $e) {
+                        error_log('Stock notification error: ' . $e->getMessage());
+                    }
+                    // ========== END STOCK NOTIFICATION ==========
+                }
                 
                 $db->commit();
                 
                 // Clear cart
                 unset($_SESSION['cart']);
+
+                try {
+                    // Initialize PHPMailerEmail
+                    $emailer = new PHPMailerEmail();
+                    
+                    // Get customer email and name
+                    $customerEmail = $user['email'] ?? '';
+                    $customerName = trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? ''));
+                    $customerName = !empty($customerName) ? $customerName : ($user['username'] ?? 'Customer');
+                    
+                    if (!empty($customerEmail)) {
+                        // Send confirmation email
+                        $emailSent = $emailer->sendOrderConfirmation($orderId, $customerEmail, $customerName);
+                        
+                        if ($emailSent) {
+                            error_log("✅ Order confirmation email sent to: " . $customerEmail);
+                        } else {
+                            error_log("❌ Failed to send order confirmation email to: " . $customerEmail);
+                        }
+                    } else {
+                        error_log("⚠️ Customer email not found for order #" . $orderNumber);
+                    }
+                    
+                } catch (Exception $e) {
+                    error_log("Email sending error: " . $e->getMessage());
+                    // Don't stop the checkout flow if email fails
+                }
+                // ========== END EMAIL SENDING ==========
                 
                 // Redirect to order confirmation
                 $redirectUrl = SITE_URL . 'orders/confirmation.php?order_id=' . $orderId . '&order_number=' . urlencode($orderNumber);
@@ -779,10 +860,14 @@ require_once __DIR__ . '/../includes/header.php';
                                 <div class="invalid-feedback">Country is required</div>
                             </div>
                             
+                            <!-- Hidden field for county that will be updated by JavaScript -->
+                            <input type="hidden" name="new_shipping_address[county]" id="countyField" 
+                                   value="<?php echo htmlspecialchars($userCounty); ?>">
+                            
                             <!-- County Selection -->
                             <div class="col-md-6">
                                 <label class="form-label fw-bold">County <span class="text-danger">*</span></label>
-                                <select class="form-control" name="new_shipping_address[county]" id="countySelect" required>
+                                <select class="form-control" id="countySelect" required>
                                     <option value="">Select County</option>
                                     <?php
                                     $counties = $shippingHelper->getAllCounties();
@@ -807,13 +892,12 @@ require_once __DIR__ . '/../includes/header.php';
                                        placeholder="Enter your county">
                             </div>
                             
-                            <!-- Towns/Areas Selection (Replaces Shipping Zone) -->
+                            <!-- Towns/Areas Selection -->
                             <div class="col-md-6">
                                 <label class="form-label fw-bold">Towns/Areas <span class="text-danger">*</span></label>
                                 <select class="form-control" name="shipping_town_area" id="townAreaSelect" required>
                                     <option value="">Select Town/Area</option>
                                     <?php
-                                    // Get all towns/areas from shipping zones
                                     $townsAreas = $shippingHelper->getAllTownsAreas();
                                     $userTownArea = $_SESSION['user']['town_area'] ?? '';
                                     
@@ -837,8 +921,6 @@ require_once __DIR__ . '/../includes/header.php';
                                     id="otherTownAreaInput"
                                     placeholder="Enter your specific town/area">
                             </div>
-                            <!-- Hidden shipping zone field (will be auto-populated based on town/area) -->
-                <input type="hidden" name="shipping_zone_id" id="hiddenShippingZoneId" value="<?php echo $shippingZoneId; ?>">
                         </div>
                         
                         <!-- Shipping Information -->
@@ -952,7 +1034,15 @@ require_once __DIR__ . '/../includes/header.php';
                                         <li>Select "Pay Bill"</li>
                                         <li>Enter Business No: <strong>123456</strong></li>
                                         <li>Enter Account No: <strong id="mpesaAccount"><?php echo $user['id'] ?? 'ORDER' . date('His'); ?></strong></li>
-                                        <li>Enter Amount: <strong>Ksh <span id="mpesaAmount"><?php echo number_format($total, 2); ?></span></strong></li>
+                                        <li>Enter Amount: <strong>Ksh <span id="mpesaAmount">
+                                            <?php 
+                                            $mpesaTotal = $subtotal + $shipping;
+                                            if ($taxSettings['enabled'] == '1') {
+                                                $mpesaTotal += $subtotal * ($taxSettings['rate'] / 100);
+                                            }
+                                            echo number_format($mpesaTotal, 2); 
+                                            ?>
+                                        </span></strong></li>
                                         <li>Enter your M-Pesa PIN</li>
                                     </ol>
                                 </div>
@@ -1000,7 +1090,6 @@ require_once __DIR__ . '/../includes/header.php';
                                                 <?php echo htmlspecialchars($product['name']); ?>
                                             </h6>
                                             <?php 
-                                            // Build variant description
                                             $variantParts = [];
                                             if (!empty($item['size'])) $variantParts[] = 'Size: ' . htmlspecialchars($item['size']);
                                             if (!empty($item['color'])) $variantParts[] = 'Color: ' . htmlspecialchars($item['color']);
@@ -1042,15 +1131,23 @@ require_once __DIR__ . '/../includes/header.php';
                                     <?php endif; ?>
                                 </span>
                             </div>
+                           <?php if ($taxSettings['enabled'] == '1'): ?>
                             <div class="d-flex justify-content-between mb-3">
-                                <span class="text-muted">Tax (16% VAT)</span>
+                                <span class="text-muted">Tax (<?php echo $taxSettings['rate']; ?>% VAT)</span>
                                 <span class="fw-bold text-dark-blue">Ksh <?php echo number_format($tax, 2); ?></span>
                             </div>
+                            <?php endif; ?>
                             <hr>
                             <div class="d-flex justify-content-between mb-3">
                                 <span class="fw-bold fs-5 text-dark-blue">Total</span>
                                 <span class="fw-bold fs-5 text-blue" id="totalSummary">
-                                    Ksh <?php echo number_format($total, 2); ?>
+                                    Ksh <?php 
+                                    $displayTotal = $subtotal + $shipping;
+                                    if ($taxSettings['enabled'] == '1') {
+                                        $displayTotal += $subtotal * ($taxSettings['rate'] / 100);
+                                    }
+                                    echo number_format($displayTotal, 2); 
+                                    ?>
                                 </span>
                             </div>
                         </div>
@@ -1105,30 +1202,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const countySelect = document.getElementById('countySelect');
     const otherCountyDiv = document.getElementById('otherCountyDiv');
     const otherCountyInput = document.getElementById('otherCountyInput');
-    const townAreaSelect = document.getElementById('townAreaSelect'); // NEW
-    const otherTownAreaDiv = document.getElementById('otherTownAreaDiv'); // NEW
-    const otherTownAreaInput = document.getElementById('otherTownAreaInput'); // NEW
-    const zoneSelect = document.getElementById('shippingZoneSelect');
-    const zoneCountiesInfo = document.getElementById('zoneCountiesInfo');
+    const townAreaSelect = document.getElementById('townAreaSelect');
+    const otherTownAreaDiv = document.getElementById('otherTownAreaDiv');
+    const otherTownAreaInput = document.getElementById('otherTownAreaInput');
+    const countyField = document.getElementById('countyField');
     const subtotal = <?php echo $subtotal; ?>;
-    
-    // Show zone counties info for selected option
-    function showZoneInfo(selectedOption) {
-        if (selectedOption && selectedOption.dataset.counties) {
-            const counties = selectedOption.dataset.counties;
-            if (counties.trim()) {
-                // Truncate if too long
-                const displayCounties = counties.length > 100 ? 
-                    counties.substring(0, 100) + '...' : counties;
-                zoneCountiesInfo.textContent = 'Covers: ' + displayCounties;
-                zoneCountiesInfo.style.display = 'block';
-            } else {
-                zoneCountiesInfo.style.display = 'none';
-            }
-        } else {
-            zoneCountiesInfo.style.display = 'none';
-        }
-    }
     
     // Handle county selection change
     if (countySelect) {
@@ -1151,6 +1229,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Update shipping for selected county
                 if (county) {
                     updateShippingByCounty(county);
+                    
+                    // Update hidden county field
+                    if (countyField) {
+                        countyField.value = county;
+                    }
                 }
             }
         });
@@ -1162,11 +1245,16 @@ document.addEventListener('DOMContentLoaded', function() {
             const otherCounty = this.value.trim();
             if (otherCounty.length > 2) {
                 updateShippingByCounty(otherCounty);
+                
+                // Update hidden county field
+                if (countyField) {
+                    countyField.value = otherCounty;
+                }
             }
         });
     }
     
-    // NEW: Handle town/area selection change
+    // Handle town/area selection change
     if (townAreaSelect) {
         townAreaSelect.addEventListener('change', function() {
             const townArea = this.value;
@@ -1192,32 +1280,12 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // NEW: Handle "Other" town/area input
+    // Handle "Other" town/area input
     if (otherTownAreaInput) {
         otherTownAreaInput.addEventListener('input', function() {
             const otherTownArea = this.value.trim();
             if (otherTownArea.length > 2) {
                 updateShippingByTownArea(otherTownArea);
-            }
-        });
-    }
-    
-    // Handle zone selection change
-    if (zoneSelect) {
-        // Show info for initially selected option
-        const initialOption = zoneSelect.options[zoneSelect.selectedIndex];
-        showZoneInfo(initialOption);
-        
-        zoneSelect.addEventListener('change', function() {
-            const selectedOption = this.options[this.selectedIndex];
-            const zoneId = this.value;
-            
-            // Show zone info
-            showZoneInfo(selectedOption);
-            
-            // Update shipping for selected zone
-            if (zoneId) {
-                updateShippingByZone(zoneId, subtotal);
             }
         });
     }
@@ -1267,9 +1335,9 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // Initialize with selected town/area if any
-    if (townAreaSelect && townAreaSelect.value && townAreaSelect.value !== 'Other') {
-        updateShippingByTownArea(townAreaSelect.value);
+    // Initialize shipping calculation on page load
+    if (countySelect && countySelect.value && countySelect.value !== 'Other') {
+        updateShippingByCounty(countySelect.value);
     }
     
     // Initialize
@@ -1313,7 +1381,7 @@ async function updateShippingByCounty(county) {
     }
 }
 
-// NEW: Update shipping based on town/area
+// Update shipping based on town/area
 async function updateShippingByTownArea(townArea) {
     if (!townArea || townArea === '' || townArea === 'Other') return;
     
@@ -1346,45 +1414,29 @@ async function updateShippingByTownArea(townArea) {
     }
 }
 
-// Update shipping based on zone ID
-async function updateShippingByZone(zoneId, subtotal) {
-    if (!zoneId || zoneId === '') return;
-    
-    try {
-        // First get the zone details to find which counties it covers
-        const response = await fetch('<?php echo SITE_URL; ?>ajax/get-zone-details.php', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                zone_id: zoneId
-            })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            // Update display with zone data
-            updateShippingDisplay(data.zone_name || 'Selected Zone', {
-                cost: data.cost,
-                message: data.zone_name + ' delivery (' + data.delivery_days + ' days)',
-                zone_id: zoneId,
-                delivery_days: data.delivery_days,
-                counties: data.counties
-            }, 'zone');
-        }
-    } catch (error) {
-        console.error('Update shipping error:', error);
-    }
-}
-
 // Update shipping display with data
 function updateShippingDisplay(location, data, type = 'county') {
     const shipping = parseFloat(data.cost) || 0;
     const subtotal = <?php echo $subtotal; ?>;
-    const tax = subtotal * 0.16;
+    
+    // Get tax settings from PHP
+    const taxEnabled = <?php echo $taxSettings['enabled'] == '1' ? 'true' : 'false'; ?>;
+    const taxRate = <?php echo $taxSettings['rate']; ?>;
+    
+    // Calculate tax based on settings
+    let tax;
+    if (taxEnabled) {
+        tax = subtotal * (taxRate / 100);
+    } else {
+        tax = 0;
+    }
+    
     const total = subtotal + shipping + tax;
+    
+    // CRITICAL: Update the hidden form fields
+    document.getElementById('hiddenShippingZoneId').value = data.zone_id || '';
+    document.getElementById('hiddenShippingCost').value = shipping;
+    document.getElementById('hiddenShippingMessage').value = data.message || 'Standard shipping';
     
     // Update shipping info alert
     const shippingInfoAlert = document.getElementById('shippingInfoAlert');
@@ -1396,11 +1448,6 @@ function updateShippingDisplay(location, data, type = 'county') {
             locationInfo = `<strong>Shipping to:</strong> <span id="currentLocation">${location}</span>`;
             if (data.zone_name) {
                 locationInfo += `<br><small class="text-muted">Zone: ${data.zone_name}</small>`;
-            }
-        } else if (type === 'zone') {
-            locationInfo = `<strong>Shipping Zone:</strong> <span id="currentLocation">${location}</span>`;
-            if (data.counties) {
-                locationInfo += `<br><small class="text-muted">Covers: ${data.counties}</small>`;
             }
         }
         
@@ -1441,14 +1488,10 @@ function updateShippingDisplay(location, data, type = 'county') {
         }, 500);
     }
     
+    // Update M-Pesa amount
     if (mpesaAmount) {
         mpesaAmount.textContent = total.toFixed(2);
     }
-    
-    // Update hidden fields
-    document.getElementById('hiddenShippingZoneId').value = data.zone_id || '';
-    document.getElementById('hiddenShippingCost').value = shipping;
-    document.getElementById('hiddenShippingMessage').value = data.message || 'Standard shipping';
 }
 
 // Update payment details based on selection
@@ -1525,7 +1568,7 @@ function validateForm() {
         { name: 'new_shipping_address[postal_code]', label: 'Postal Code' },
         { name: 'new_shipping_address[country]', label: 'Country' },
         { name: 'new_shipping_address[county]', label: 'County' },
-        { name: 'shipping_town_area', label: 'Town/Area' } // NEW
+        { name: 'shipping_town_area', label: 'Town/Area' }
     ];
     
     requiredFields.forEach(field => {
@@ -1547,10 +1590,16 @@ function validateForm() {
             errors.push('Please specify your county');
             if (otherCountyInput) otherCountyInput.classList.add('is-invalid');
             isValid = false;
+        } else {
+            // Update hidden county field
+            const countyField = document.getElementById('countyField');
+            if (countyField) {
+                countyField.value = otherCountyInput.value.trim();
+            }
         }
     }
     
-    // NEW: Check "Other" town/area if selected
+    // Check "Other" town/area if selected
     const townAreaSelect = document.getElementById('townAreaSelect');
     if (townAreaSelect && townAreaSelect.value === 'Other') {
         const otherTownAreaInput = document.getElementById('otherTownAreaInput');
@@ -1568,13 +1617,20 @@ function validateForm() {
         isValid = false;
     }
     
+    // Check shipping cost is calculated
+    const shippingCost = document.getElementById('hiddenShippingCost').value;
+    if (!shippingCost && shippingCost !== '0') {
+        errors.push('Please select a county/town to calculate shipping');
+        isValid = false;
+    }
+    
     // Show errors if any
     if (errors.length > 0) {
         showErrorModal(errors);
         return false;
     }
     
-    return isValid;
+    return true;
 }
 
 // Show error modal
@@ -1619,17 +1675,16 @@ function showErrorModal(errors) {
     modal.show();
 }
 
-// Validate "Other" county on form submission
+// Validate form on submission
 document.getElementById('checkoutForm')?.addEventListener('submit', function(e) {
     const countySelect = document.getElementById('countySelect');
-    const otherCountyDiv = document.getElementById('otherCountyDiv');
     const otherCountyInput = document.getElementById('otherCountyInput');
     const townAreaSelect = document.getElementById('townAreaSelect');
-    const otherTownAreaDiv = document.getElementById('otherTownAreaDiv');
     const otherTownAreaInput = document.getElementById('otherTownAreaInput');
+    const countyField = document.getElementById('countyField');
     
     // Validate "Other" county
-    if (countySelect && countySelect.value === 'Other' && otherCountyDiv.style.display === 'block') {
+    if (countySelect && countySelect.value === 'Other') {
         if (!otherCountyInput || !otherCountyInput.value.trim()) {
             e.preventDefault();
             alert('Please specify your county');
@@ -1637,12 +1692,14 @@ document.getElementById('checkoutForm')?.addEventListener('submit', function(e) 
             return false;
         }
         
-        // Set the actual county value
-        countySelect.value = otherCountyInput.value.trim();
+        // Ensure hidden county field is updated
+        if (countyField) {
+            countyField.value = otherCountyInput.value.trim();
+        }
     }
     
-    // NEW: Validate "Other" town/area
-    if (townAreaSelect && townAreaSelect.value === 'Other' && otherTownAreaDiv.style.display === 'block') {
+    // Validate "Other" town/area
+    if (townAreaSelect && townAreaSelect.value === 'Other') {
         if (!otherTownAreaInput || !otherTownAreaInput.value.trim()) {
             e.preventDefault();
             alert('Please specify your town/area');
@@ -1650,7 +1707,7 @@ document.getElementById('checkoutForm')?.addEventListener('submit', function(e) 
             return false;
         }
         
-        // Set the actual town/area value
+        // Update the town/area select value
         townAreaSelect.value = otherTownAreaInput.value.trim();
     }
     

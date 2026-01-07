@@ -12,6 +12,7 @@ require_once __DIR__ . '/layout.php';
 require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/Database.php';
 require_once __DIR__ . '/../includes/App.php';
+require_once __DIR__ . '/../includes/TaxHelper.php'; // ADDED
 
 $app = new App();
 $db = $app->getDB();
@@ -69,7 +70,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
 // 4. FETCH ORDER DETAILS
 // ====================================================================
 
-// Fetch order details - UPDATED TO INCLUDE SHIPPING COLUMNS
+// Fetch order details - UPDATED TO INCLUDE TAX COLUMNS
 $stmt = $db->prepare("
     SELECT 
         o.*,
@@ -81,7 +82,10 @@ $stmt = $db->prepare("
         COALESCE(o.shipping_cost, 0) as shipping_cost,
         COALESCE(o.shipping_message, 'Standard shipping') as shipping_message,
         COALESCE(o.shipping_county, '') as shipping_county,
-        COALESCE(o.shipping_town_area, '') as shipping_town_area
+        COALESCE(o.shipping_town_area, '') as shipping_town_area,
+        COALESCE(o.tax_enabled, 0) as tax_enabled,
+        COALESCE(o.tax_rate, 0) as tax_rate,
+        COALESCE(o.tax_amount, 0) as tax_amount
     FROM orders o
     LEFT JOIN users u ON o.user_id = u.id
     WHERE o.id = ?
@@ -93,6 +97,12 @@ if (!$order) {
     $app->setFlashMessage('error', 'Order not found');
     $app->redirect('admin/orders');
 }
+
+// Debug: Check tax data in order
+error_log("Order tax data:");
+error_log("  tax_enabled: " . ($order['tax_enabled'] ?? 'NULL'));
+error_log("  tax_rate: " . ($order['tax_rate'] ?? 'NULL'));
+error_log("  tax_amount: " . ($order['tax_amount'] ?? 'NULL'));
 
 // Fetch order items with variant information
 $itemsStmt = $db->prepare("
@@ -117,6 +127,30 @@ $orderItems = $itemsStmt->fetchAll();
 // ====================================================================
 // 5. BUILD CONTENT
 // ====================================================================
+
+// Calculate items subtotal
+$itemsSubtotal = 0;
+foreach ($orderItems as $item) {
+    $itemsSubtotal += $item['total_price'];
+}
+
+$shippingCost = (float)($order['shipping_cost'] ?? 0);
+
+// Get tax information - Use stored order data first, then fallback to settings
+if (isset($order['tax_enabled']) && $order['tax_enabled'] == '1' && isset($order['tax_rate'])) {
+    // Use tax data stored with the order
+    $taxEnabled = true;
+    $taxRate = (float)$order['tax_rate'];
+    $taxAmount = isset($order['tax_amount']) ? (float)$order['tax_amount'] : ($itemsSubtotal * ($taxRate / 100));
+} else {
+    // Fallback to current tax settings
+    $taxSettings = TaxHelper::getTaxSettings($db);
+    $taxEnabled = $taxSettings['enabled'] == '1';
+    $taxRate = (float)$taxSettings['rate'];
+    $taxAmount = $taxEnabled ? ($itemsSubtotal * ($taxRate / 100)) : 0;
+}
+
+$grandTotal = $itemsSubtotal + $shippingCost + $taxAmount;
 
 $content = '
 <div class="container-fluid">
@@ -293,16 +327,7 @@ foreach ($orderItems as $item) {
                                     <td class="fw-bold">Ksh ' . number_format($item['total_price'], 2) . '</td>
                                 </tr>';
 }
-// Calculate items subtotal
-$itemsSubtotal = 0;
-foreach ($orderItems as $item) {
-    $itemsSubtotal += $item['total_price'];
-}
 
-$shippingCost = (float)($order['shipping_cost'] ?? 0);
-$taxRate = 0.16;
-$taxAmount = $itemsSubtotal * $taxRate;
-$grandTotal = $itemsSubtotal + $shippingCost + $taxAmount;
 $content .= '
                                 <tr class="table-light">
                                     <td colspan="4" class="text-end fw-bold">Items Subtotal</td>
@@ -312,10 +337,11 @@ $content .= '
                                     <td colspan="4" class="text-end fw-bold">Shipping (' . htmlspecialchars($order['shipping_message'] ?? 'Standard shipping') . ')</td>
                                     <td class="fw-bold">Ksh ' . number_format($shippingCost, 2) . '</td>
                                 </tr>
+                                ' . ($taxEnabled ? '
                                 <tr class="table-light">
-                                    <td colspan="4" class="text-end fw-bold">Tax (16% VAT)</td>
+                                    <td colspan="4" class="text-end fw-bold">Tax (' . number_format($taxRate, 1) . '% VAT)</td>
                                     <td class="fw-bold">Ksh ' . number_format($taxAmount, 2) . '</td>
-                                </tr>
+                                </tr>' : '') . '
                                 <tr class="table-light">
                                     <td colspan="4" class="text-end fw-bold h5">Total</td>
                                     <td class="fw-bold h5">Ksh ' . number_format($grandTotal, 2) . '</td>
@@ -396,6 +422,19 @@ $content .= '
                             </span>
                         </div>
                     </div>
+                    
+                    <!-- Tax Information -->
+                    ' . ($taxEnabled ? '
+                    <div class="mt-4 pt-3 border-top">
+                        <small class="text-muted d-block mb-2">Tax Information</small>
+                        <div class="small">
+                            <i class="fas fa-percentage text-success me-1"></i>
+                            Tax applied: ' . number_format($taxRate, 1) . '% VAT
+                            <br>
+                            <i class="fas fa-money-bill-wave text-success me-1"></i>
+                            Tax amount: Ksh ' . number_format($taxAmount, 2) . '
+                        </div>
+                    </div>' : '') . '
                     
                     <!-- Variant Summary -->
                     ' . (count(array_filter($orderItems, function($item) {

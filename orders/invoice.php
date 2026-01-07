@@ -7,7 +7,7 @@ ini_set('display_errors', 1);
 require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/Database.php';
 require_once __DIR__ . '/../includes/App.php';
-
+require_once __DIR__ . '/../includes/TaxHelper.php';
 $app = new App();
 $db = $app->getDB();
 
@@ -54,9 +54,23 @@ try {
     // Calculate subtotal
     $subtotal = array_sum(array_column($orderItems, 'total_price'));
     
-    // Calculate shipping and tax (approximate)
-    $shipping = $order['total_amount'] - $subtotal - ($subtotal * 0.16);
-    $tax = $subtotal * 0.16;
+    // Get tax settings
+    $taxSettings = TaxHelper::getTaxSettings($db);
+
+    // Calculate tax based on settings
+    if ($taxSettings['enabled'] == '1') {
+        $tax = $subtotal * ($taxSettings['rate'] / 100);
+    } else {
+        $tax = 0;
+    }
+
+    // Calculate shipping (use stored value or calculate)
+    if (isset($order['shipping_cost']) && $order['shipping_cost'] > 0) {
+        $shipping = $order['shipping_cost'];
+    } else {
+        // Calculate shipping from total
+        $shipping = $order['total_amount'] - $subtotal - $tax;
+    }
     
 } catch (Exception $e) {
     die("Error loading invoice: " . $e->getMessage());
@@ -88,13 +102,22 @@ require_once __DIR__ . '/../includes/header.php';
                             <i class="fas fa-print me-2"></i> Print Invoice
                         </button>
                         <a href="<?php echo SITE_URL; ?>orders/confirmation.php?order_id=<?php echo $orderId; ?>" 
-                           class="btn btn-dark">
+                        class="btn btn-dark">
                             <i class="fas fa-receipt me-2"></i> View Order
                         </a>
                     </div>
                     <p class="text-muted mb-0">
                         Invoice Date: <?php echo date('F j, Y', strtotime($order['created_at'])); ?>
                     </p>
+                    <?php if ($taxSettings['enabled'] == '1'): ?>
+                    <p class="text-muted mb-0">
+                        Tax Status: Included (<?php echo $taxSettings['rate']; ?>% VAT)
+                    </p>
+                    <?php else: ?>
+                    <p class="text-muted mb-0">
+                        Tax Status: Excluded
+                    </p>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
@@ -103,12 +126,24 @@ require_once __DIR__ . '/../includes/header.php';
     <!-- Company and Customer Info -->
     <div class="row mb-5">
         <div class="col-md-6">
-            <div class="card border-0 bg-light">
+           <div class="card border-0 bg-light">
                 <div class="card-body">
                     <h5 class="fw-bold mb-3">Linen Closet</h5>
                     <p class="mb-1">123 Fashion Street</p>
                     <p class="mb-1">Nairobi, Kenya</p>
                     <p class="mb-1">Phone: +254 700 000 000</p>
+                    
+                    <?php 
+                    // Get tax number from settings if available
+                    $taxNumberStmt = $db->prepare("SELECT setting_value FROM settings WHERE setting_key = 'tax_number'");
+                    $taxNumberStmt->execute();
+                    $taxNumber = $taxNumberStmt->fetchColumn();
+                    ?>
+                    
+                    <?php if ($taxNumber): ?>
+                    <p class="mb-1">Tax Number: <?php echo htmlspecialchars($taxNumber); ?></p>
+                    <?php endif; ?>
+                    
                     <p class="mb-0">Email: billing@linencloset.com</p>
                     <p class="mb-0">Website: www.linencloset.com</p>
                 </div>
@@ -187,10 +222,12 @@ require_once __DIR__ . '/../includes/header.php';
                             <?php endif; ?>
                         </span>
                     </div>
-                    <div class="d-flex justify-content-between mb-3">
-                        <span class="text-muted">Tax (16% VAT):</span>
-                        <span class="fw-bold">Ksh <?php echo number_format($tax, 2); ?></span>
-                    </div>
+                    <?php if ($taxSettings['enabled'] == '1'): ?>
+                        <div class="d-flex justify-content-between mb-3">
+                            <span class="text-muted">Tax (<?php echo $taxSettings['rate']; ?>% VAT):</span>
+                            <span class="fw-bold">Ksh <?php echo number_format($tax, 2); ?></span>
+                        </div>
+                    <?php endif; ?>
                     <hr>
                     <div class="d-flex justify-content-between mb-3">
                         <span class="fw-bold fs-5">Total:</span>
@@ -245,11 +282,14 @@ require_once __DIR__ . '/../includes/header.php';
                                 </span>
                             </p>
                         </div>
-                        <div class="col-md-4">
+                       <div class="col-md-4">
                             <h6 class="fw-bold mb-3">Terms & Conditions</h6>
                             <p class="small text-muted mb-0">
                                 Payment due upon receipt. Late payments subject to 1.5% monthly interest.
                                 Returns accepted within 30 days of delivery.
+                                <?php if ($taxSettings['enabled'] == '1'): ?>
+                                <br>Prices include <?php echo $taxSettings['rate']; ?>% VAT where applicable.
+                                <?php endif; ?>
                             </p>
                         </div>
                     </div>

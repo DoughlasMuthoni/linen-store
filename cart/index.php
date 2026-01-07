@@ -7,7 +7,25 @@ require_once __DIR__ . '/../includes/App.php';
 require_once __DIR__ . '/../includes/Shipping.php';
 $app = new App();
 $db = $app->getDB();
+// Function to get tax settings
+function getTaxSettings($db) {
+    $stmt = $db->prepare("SELECT setting_key, setting_value FROM settings WHERE setting_key IN ('tax_enabled', 'tax_rate', 'tax_display')");
+    $stmt->execute();
+    
+    $settings = [];
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $settings[$row['setting_key']] = $row['setting_value'];
+    }
+    
+    return [
+        'enabled' => $settings['tax_enabled'] ?? '1',
+        'rate' => floatval($settings['tax_rate'] ?? 16),
+        'display' => $settings['tax_display'] ?? 'inclusive'
+    ];
+}
 
+// Get tax settings
+$taxSettings = getTaxSettings($db);
 // Start session if not already started
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
@@ -113,17 +131,25 @@ if (!empty($cart)) {
        
        
         $shippingHelper = new Shipping($db);
-
+        // Get tax settings
+        $taxSettings = getTaxSettings($db);
         // Get shipping cost (default to Nairobi or get from session)
         $userCounty = $_SESSION['user']['county'] ?? 'Nairobi';
         $shippingInfo = $shippingHelper->calculateShipping($userCounty, $subtotal);
 
         $shipping = $shippingInfo['cost'];
         $shippingMessage = $shippingInfo['message'] ?? 'Standard shipping'; // Add default message
-        $tax = $subtotal * 0.16;
+        
+        // Calculate tax if enabled
+        if ($taxSettings['enabled'] == '1') {
+            $tax = $subtotal * ($taxSettings['rate'] / 100);
+        } else {
+            $tax = 0;
+        }
+
         $total = $subtotal + $shipping + $tax;
-    }
-}
+            }
+        }
 
 $pageTitle = "Shopping Cart (" . $cartCount . " items)";
 
@@ -493,12 +519,14 @@ require_once __DIR__ . '/../includes/header.php';
                                     <?php endif; ?>
                                 </span>
                             </div>
-                            <div class="d-flex justify-content-between mb-3">
-                                <span class="text-muted">Tax (16% VAT)</span>
-                                <span class="fw-bold text-blue" id="taxAmount">
-                                    Ksh <?php echo number_format($tax, 2); ?>
-                                </span>
-                            </div>
+                            <?php if ($taxSettings['enabled'] == '1'): ?>
+                                <div class="d-flex justify-content-between mb-3">
+                                    <span class="text-muted">Tax (<?php echo $taxSettings['rate']; ?>% VAT)</span>
+                                    <span class="fw-bold text-blue" id="taxAmount">
+                                        Ksh <?php echo number_format($tax, 2); ?>
+                                    </span>
+                                </div>
+                                <?php endif; ?>
                             <hr>
                             <div class="d-flex justify-content-between mb-3">
                                 <span class="fw-bold fs-5 text-blue">Total</span>
@@ -776,7 +804,7 @@ async function removeCartItem(cartKey) {
 
 // Update cart display
 function updateCartDisplay(cartData) {
-    console.log('Cart data received:', cartData); // For debugging
+    console.log('Cart data received:', cartData);
     
     // Update cart count in header
     const cartCountElements = document.querySelectorAll('.cart-count');
@@ -802,16 +830,38 @@ function updateCartDisplay(cartData) {
     }
     
     // Update order summary
-    if (document.getElementById('subtotalAmount')) {
-        document.getElementById('subtotalAmount').textContent = 'Ksh ' + (cartData.subtotal || 0).toFixed(2);
-        document.getElementById('shippingAmount').innerHTML = cartData.shipping > 0 
-            ? 'Ksh ' + (cartData.shipping || 0).toFixed(2) 
-            : '<span class="text-success">FREE</span>';
-        document.getElementById('taxAmount').textContent = 'Ksh ' + (cartData.tax || 0).toFixed(2);
-        document.getElementById('totalAmount').textContent = 'Ksh ' + (cartData.total || 0).toFixed(2);
+    const subtotalElem = document.getElementById('subtotalAmount');
+    const shippingElem = document.getElementById('shippingAmount');
+    const taxElem = document.getElementById('taxAmount');
+    const totalElem = document.getElementById('totalAmount');
+    
+    if (subtotalElem) {
+        subtotalElem.textContent = 'Ksh ' + (cartData.subtotal || 0).toFixed(2);
     }
     
-    // Update individual item totals in the table
+    if (shippingElem) {
+        if (cartData.shipping > 0) {
+            shippingElem.innerHTML = 'Ksh ' + (cartData.shipping || 0).toFixed(2);
+        } else {
+            shippingElem.innerHTML = '<span class="text-success">FREE</span>';
+        }
+    }
+    
+    // Update tax display based on tax settings
+    if (taxElem) {
+        if (cartData.tax_enabled == '1' && cartData.tax_rate > 0) {
+            taxElem.innerHTML = 'Ksh ' + (cartData.tax || 0).toFixed(2);
+            taxElem.closest('div').style.display = 'block';
+        } else {
+            taxElem.closest('div').style.display = 'none';
+        }
+    }
+    
+    if (totalElem) {
+        totalElem.textContent = 'Ksh ' + (cartData.total || 0).toFixed(2);
+    }
+    
+    // Update individual item totals
     updateIndividualItemTotals(cartData);
     
     // If cart is empty, reload page after delay
@@ -821,7 +871,6 @@ function updateCartDisplay(cartData) {
         }, 1500);
     }
 }
-
 // New function to update individual item totals
 function updateIndividualItemTotals(cartData) {
     // Only update if we have items data

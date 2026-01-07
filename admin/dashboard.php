@@ -424,7 +424,7 @@ document.addEventListener("DOMContentLoaded", function() {
                     pointBorderWidth: 2,
                     tension: 0.3
                 }, {
-                    label: "Revenue ($)",
+                    label: "Revenue (Ksh)",
                     data: ' . json_encode($chartRevenue) . ',
                     backgroundColor: "rgba(28, 200, 138, 0.05)",
                     borderColor: "rgba(28, 200, 138, 1)",

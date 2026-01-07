@@ -1,1506 +1,1490 @@
 <?php
-// /linen-closet/cart/checkout.php
+// /linen-closet/homepage.php
 
-// Add error reporting at the top
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
-
-require_once __DIR__ . '/../includes/config.php';
-require_once __DIR__ . '/../includes/Database.php';
-require_once __DIR__ . '/../includes/App.php';
-require_once __DIR__ . '/../includes/Shipping.php';
-require_once __DIR__ . '/../includes/NotificationHelper.php';
+// Get database connection
+require_once 'includes/config.php';
+require_once 'includes/Database.php';
+require_once 'includes/App.php';
 
 $app = new App();
 $db = $app->getDB();
 
-// Check if user is logged in
-if (!$app->isLoggedIn()) {
-    // Use session directly if App method doesn't work
-    if (session_status() === PHP_SESSION_NONE) {
-        session_start();
-    }
-    
-    if (!isset($_SESSION['user_id']) || empty($_SESSION['user_id'])) {
-        header('Location: ' . SITE_URL . 'auth/login.php?redirect=cart/checkout');
-        exit();
-    }
-}
-
-// Start session if not already started
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
-
-// Check if cart is empty
-if (empty($_SESSION['cart'])) {
-    header('Location: ' . SITE_URL . 'cart');
-    exit();
-}
-
-// Fetch cart items - handle new variant structure
-$cart = $_SESSION['cart'];
-
-// Extract product IDs from cart items (handles both old and new structure)
-$productIds = [];
-foreach ($cart as $cartKey => $item) {
-    if (isset($item['product_id'])) {
-        $productIds[] = $item['product_id'];
-    } elseif (is_numeric($cartKey)) {
-        // Old structure: cart key is product ID
-        $productIds[] = $cartKey;
-    }
-}
-$productIds = array_unique($productIds);
-$placeholders = str_repeat('?,', count($productIds) - 1) . '?';
-
-// FIXED: Include min_stock_level in the query
-$stmt = $db->prepare("
-    SELECT 
-        p.id,
-        p.name,
-        p.price,
-        p.stock_quantity,
-        p.min_stock_level,  -- CRITICAL: Add this
-        p.sku,
-        p.is_active,
-        (SELECT image_url FROM product_images pi WHERE pi.product_id = p.id AND pi.is_primary = 1 LIMIT 1) as primary_image
-    FROM products p
-    WHERE p.id IN ($placeholders) AND p.is_active = 1
-");
-
-$stmt->execute($productIds);
-$products = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-// Calculate totals
-$subtotal = 0;
-$cartItems = [];
-
-foreach ($products as $product) {
-    $productId = $product['id'];
-    
-    // Find all cart items for this product (including variants)
-    foreach ($cart as $cartKey => $cartItemData) {
-        $itemProductId = null;
-        
-        // Determine product ID based on cart structure
-        if (isset($cartItemData['product_id'])) {
-            $itemProductId = $cartItemData['product_id'];
-        } elseif (is_numeric($cartKey)) {
-            $itemProductId = $cartKey;
-        }
-        
-        // Skip if not this product
-        if ($itemProductId != $productId) {
-            continue;
-        }
-        
-        $quantity = $cartItemData['quantity'] ?? 1;
-        $price = $cartItemData['price'] ?? $product['price'];
-        $itemTotal = $price * $quantity;
-        
-        $cartItems[] = [
-            'cart_key' => $cartKey,
-            'product' => $product,
-            'quantity' => $quantity,
-            'price' => $price,
-            'total' => $itemTotal,
-            'size' => $cartItemData['size'] ?? null,
-            'color' => $cartItemData['color'] ?? null,
-            'material' => $cartItemData['material'] ?? null,
-            'variant_id' => $cartItemData['variant_id'] ?? null
-        ];
-        
-        $subtotal += $itemTotal;
-    }
-}
-
-
-// NEW CODE (replace with):
-$shippingHelper = new Shipping($db);
-
-// Get shipping cost based on county (get from session or default)
-$userCounty = $_SESSION['user']['county'] ?? 'Nairobi'; // Default or from user profile
-$shippingInfo = $shippingHelper->calculateShipping($userCounty, $subtotal);
-
-$shipping = $shippingInfo['cost'];
-$shippingMessage = $shippingInfo['message'] ?? 'Standard shipping';
-$tax = $subtotal * 0.16;
-$total = $subtotal + $shipping + $tax;
-
-
-// Get counties from shipping zones
-$shippingHelper = new Shipping($db);
-$countiesList = $shippingHelper->getAllCounties();
-$shippingZones = $shippingHelper->getZonesForDropdown();
-
-// Calculate shipping cost
-$userCounty = $_SESSION['user']['county'] ?? 'Nairobi';
-$shippingInfo = $shippingHelper->calculateShipping($userCounty, $subtotal);
-
-$shipping = $shippingInfo['cost'];
-$shippingMessage = $shippingInfo['message'] ?? 'Standard shipping';
-$shippingZoneId = $shippingInfo['zone_id'] ?? null;
-
-// Fetch user data - try App method first, then fallback to database
+// Fetch new arrivals (products added in the last 30 days)
+$newArrivals = [];
 try {
-    if (method_exists($app, 'getCurrentUser') && $app->isLoggedIn()) {
-        $user = $app->getCurrentUser();
-    } else {
-        // Fallback: fetch user from database using session
-        $userId = $_SESSION['user_id'] ?? 0;
-        $userStmt = $db->prepare("SELECT * FROM users WHERE id = ?");
-        $userStmt->execute([$userId]);
-        $user = $userStmt->fetch(PDO::FETCH_ASSOC) ?: [];
-    }
-} catch (Exception $e) {
-    $user = [];
-}
-
-// ========== Fetch user addresses from user_addresses table ==========
-try {
-    $addressStmt = $db->prepare("
-        SELECT * FROM user_addresses 
-        WHERE user_id = ? 
-        ORDER BY is_default DESC, created_at DESC
+    $stmt = $db->prepare("
+        SELECT 
+            p.*,
+            c.name as category_name,
+            c.slug as category_slug,
+            (SELECT image_url FROM product_images pi WHERE pi.product_id = p.id AND pi.is_primary = 1 LIMIT 1) as primary_image,
+            (SELECT MIN(price) FROM product_variants pv WHERE pv.product_id = p.id AND pv.stock_quantity > 0) as variant_min_price,
+            (SELECT MAX(price) FROM product_variants pv WHERE pv.product_id = p.id AND pv.stock_quantity > 0) as variant_max_price,
+            COALESCE((SELECT MIN(price) FROM product_variants pv WHERE pv.product_id = p.id AND pv.stock_quantity > 0), p.price) as display_price,
+            (SELECT SUM(stock_quantity) FROM product_variants pv WHERE pv.product_id = p.id) as total_variant_stock
+        FROM products p
+        LEFT JOIN categories c ON p.category_id = c.id
+        WHERE p.is_active = 1 
+        AND p.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+        ORDER BY p.created_at DESC
+        LIMIT 8
     ");
-    $addressStmt->execute([$user['id'] ?? 0]);
-    $addresses = $addressStmt->fetchAll(PDO::FETCH_ASSOC);
+    $stmt->execute();
+    $newArrivals = $stmt->fetchAll();
 } catch (Exception $e) {
-    $addresses = [];
-    error_log("Error fetching addresses: " . $e->getMessage());
+    error_log("Error fetching new arrivals: " . $e->getMessage());
 }
 
-// Handle form submission
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // Validate and process order
-    $errors = [];
-    
-    // Validate shipping address
-    $hasSavedAddress = !empty($_POST['shipping_address_id']);
-    $hasNewAddress = !empty($_POST['new_shipping_address']['address_line1']);
-    
-    if (!$hasSavedAddress && !$hasNewAddress) {
-        $errors[] = 'Please select or enter a shipping address';
-    }
-    
-    // Validate payment method
-    if (empty($_POST['payment_method'])) {
-        $errors[] = 'Please select a payment method';
-    }
-    
-    if (empty($errors)) {
-        // Create order
-        try {
-            $db->beginTransaction();
-            
-            
-           // ========== Determine shipping address ==========
-    if (!empty($_POST['shipping_address_id'])) {
-        // Use saved address
-        $addressId = intval($_POST['shipping_address_id']);
-        $addressStmt = $db->prepare("SELECT * FROM user_addresses WHERE id = ? AND user_id = ?");
-        $addressStmt->execute([$addressId, $user['id']]);
-        $savedAddress = $addressStmt->fetch(PDO::FETCH_ASSOC);
-        
-        if ($savedAddress) {
-            $shippingAddress = implode(', ', array_filter([
-                $savedAddress['full_name'],
-                $savedAddress['address_line1'],
-                $savedAddress['address_line2'],
-                $savedAddress['city'],
-                $savedAddress['state'],
-                $savedAddress['postal_code'],
-                $savedAddress['country']
-            ]));
-            
-            // Get county from saved address or new input
-            $county = $savedAddress['county'] ?? ($_POST['new_shipping_address']['county'] ?? 'Nairobi');
-        }
+// Fetch best sellers (based on order items)
+$bestSellers = [];
+try {
+    $stmt = $db->prepare("
+        SELECT 
+            p.*,
+            c.name as category_name,
+            c.slug as category_slug,
+            (SELECT image_url FROM product_images pi WHERE pi.product_id = p.id AND pi.is_primary = 1 LIMIT 1) as primary_image,
+            (SELECT MIN(price) FROM product_variants pv WHERE pv.product_id = p.id AND pv.stock_quantity > 0) as variant_min_price,
+            (SELECT MAX(price) FROM product_variants pv WHERE pv.product_id = p.id AND pv.stock_quantity > 0) as variant_max_price,
+            COALESCE((SELECT MIN(price) FROM product_variants pv WHERE pv.product_id = p.id AND pv.stock_quantity > 0), p.price) as display_price,
+            (SELECT SUM(stock_quantity) FROM product_variants pv WHERE pv.product_id = p.id) as total_variant_stock,
+            (SELECT COUNT(*) FROM order_items oi WHERE oi.product_id = p.id) as times_ordered
+        FROM products p
+        LEFT JOIN categories c ON p.category_id = c.id
+        WHERE p.is_active = 1
+        ORDER BY times_ordered DESC, p.id DESC
+        LIMIT 8
+    ");
+    $stmt->execute();
+    $bestSellers = $stmt->fetchAll();
+} catch (Exception $e) {
+    error_log("Error fetching best sellers: " . $e->getMessage());
+}
+
+// Fetch featured categories
+$categories = [];
+try {
+   $stmt = $db->prepare("
+    SELECT 
+        c.id,
+        c.name,
+        c.slug,
+        c.image_url,
+        c.description,
+        COUNT(p.id) as product_count
+    FROM categories c
+    LEFT JOIN products p ON c.id = p.category_id AND p.is_active = 1
+    WHERE c.is_active = 1 
+    AND (c.parent_id IS NULL OR c.parent_id = 0)
+    GROUP BY c.id
+    ORDER BY c.name
+    LIMIT 6
+");
+    $stmt->execute();
+    $categories = $stmt->fetchAll();
+} catch (Exception $e) {
+    error_log("Error fetching categories: " . $e->getMessage());
+}
+
+// Fetch sale products
+$saleProducts = [];
+try {
+    $stmt = $db->prepare("
+        SELECT 
+            p.*,
+            c.name as category_name,
+            c.slug as category_slug,
+            (SELECT image_url FROM product_images pi WHERE pi.product_id = p.id AND pi.is_primary = 1 LIMIT 1) as primary_image,
+            (SELECT MIN(price) FROM product_variants pv WHERE pv.product_id = p.id AND pv.stock_quantity > 0) as variant_min_price,
+            (SELECT MAX(price) FROM product_variants pv WHERE pv.product_id = p.id AND pv.stock_quantity > 0) as variant_max_price,
+            COALESCE((SELECT MIN(price) FROM product_variants pv WHERE pv.product_id = p.id AND pv.stock_quantity > 0), p.price) as display_price,
+            (SELECT SUM(stock_quantity) FROM product_variants pv WHERE pv.product_id = p.id) as total_variant_stock
+        FROM products p
+        LEFT JOIN categories c ON p.category_id = c.id
+        WHERE p.is_active = 1 
+        AND p.compare_price > p.price
+        ORDER BY (p.compare_price - p.price) / p.compare_price DESC
+        LIMIT 8
+    ");
+    $stmt->execute();
+    $saleProducts = $stmt->fetchAll();
+} catch (Exception $e) {
+    error_log("Error fetching sale products: " . $e->getMessage());
+}
+
+// Helper function to format price (same as products page)
+function formatPrice($price) {
+    return 'Ksh ' . number_format($price, 2);
+}
+
+// Helper function to get stock status (same as products page)
+function getStockStatus($stock) {
+    if ($stock <= 0) {
+        return ['class' => 'danger', 'text' => 'Out of Stock'];
+    } elseif ($stock <= 10) {
+        return ['class' => 'warning', 'text' => $stock . ' Left'];
     } else {
-        // Use new address
-        $addr = $_POST['new_shipping_address'];
-        $shippingAddress = implode(', ', array_filter([
-            $addr['full_name'],
-            $addr['address_line1'],
-            $addr['address_line2'],
-            $addr['city'],
-            $addr['state'],
-            $addr['postal_code'],
-            $addr['country']
-        ]));
-        
-        $county = $addr['county'] ?? 'Nairobi';
-        
-        // Save new address to user_addresses table if checkbox is checked
-        if (isset($_POST['save_new_address']) && $_POST['save_new_address'] == '1') {
-            $saveAddressStmt = $db->prepare("
-                INSERT INTO user_addresses 
-                (user_id, address_title, full_name, address_line1, address_line2, 
-                city, state, postal_code, country, county, phone, email)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ");
-            
-            $addressTitle = 'Address from ' . date('M j, Y');
-            $saveAddressStmt->execute([
-                $user['id'],
-                $addressTitle,
-                $addr['full_name'],
-                $addr['address_line1'],
-                $addr['address_line2'] ?? '',
-                $addr['city'],
-                $addr['state'],
-                $addr['postal_code'],
-                $addr['country'],
-                $county,
-                $addr['phone'] ?? ($user['phone'] ?? ''),
-                $addr['email'] ?? ($user['email'] ?? '')
-            ]);
-        }
-    }
-            
-                    // Get shipping info from POST
-            $shippingZoneId = $_POST['shipping_zone_id'] ?? null;
-            $shippingCost = $_POST['shipping_cost'] ?? 0;
-            $shippingMessage = $_POST['shipping_message'] ?? 'Standard shipping';
-
-            // Insert order with shipping zone info
-            $orderStmt = $db->prepare("
-                INSERT INTO orders (
-                    order_number, 
-                    user_id, 
-                    total_amount,
-                    shipping_address, 
-                    shipping_county,
-                    shipping_zone_id,
-                    shipping_cost,
-                    shipping_message,
-                    billing_address,
-                    status, 
-                    payment_method, 
-                    payment_status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ");
-
-            
-            $orderNumber = 'ORD-' . date('Ymd') . '-' . strtoupper(substr(uniqid(), -8));
-            $status = 'pending';
-            $payment_status = 'pending';
-            
-            $orderStmt->execute([
-            $orderNumber,
-            $user['id'] ?? 0,
-            $total,
-            $shippingAddress,
-            $county, // Add this
-            $shippingZoneId, // Add this
-            $shippingCost, // Add this
-            $shippingMessage, // Add this
-            $shippingAddress,
-            $status,
-            $_POST['payment_method'],
-            $payment_status
-        ]);
-            
-            $orderId = $db->lastInsertId();
-            NotificationHelper::createPaymentNotification(
-                $db,
-                $orderId,
-                $orderNumber,
-                'pending', // initial status
-                $_POST['payment_method'],
-                $total
-            );
-
-          // ========== ADD ORDER NOTIFICATION ==========
-        try {
-            $customerName = ($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? '');
-            $customerName = trim($customerName) ?: 'Customer';
-            
-            // Use NotificationHelper to create order notification
-            NotificationHelper::createOrderNotification(
-                $db,
-                $orderId,
-                $orderNumber,
-                $customerName
-            );
-            
-            // Also create a notification for the customer
-            NotificationHelper::create(
-                $db,
-                $user['id'] ?? 0,
-                'order',
-                'Order Confirmed',
-                'Your order #' . $orderNumber . ' has been received',
-                '/orders/view.php?id=' . $orderId
-            );
-            
-        } catch (Exception $e) {
-            error_log('Order notification error: ' . $e->getMessage());
-        }
-        // ========== END ORDER NOTIFICATION ==========
-            
-            if ($orderId) {
-                // Store in session for confirmation page
-                $_SESSION['last_order_id'] = $orderId;
-                $_SESSION['last_order_number'] = $orderNumber;
-                
-                // Insert order items
-                $orderItemStmt = $db->prepare("
-                    INSERT INTO order_items (
-                        order_id, product_id, product_name, product_sku,
-                        quantity, unit_price, total_price,
-                        size, color, material
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ");
-                
-            $itemsInserted = 0;
-            foreach ($cartItems as $item) {
-                    $product = $item['product'];
-                    $orderItemStmt->execute([
-                        $orderId,
-                        $product['id'],
-                        $product['name'],
-                        $product['sku'] ?? 'N/A',
-                        $item['quantity'],
-                        $item['price'],
-                        $item['total'],
-                        $item['size'] ?? null,
-                        $item['color'] ?? null,
-                        $item['material'] ?? null
-                    ]);
-                    $itemsInserted++;
-                    
-                    // Update product stock
-                    $updateStmt = $db->prepare("
-                        UPDATE products 
-                        SET stock_quantity = stock_quantity - ?, 
-                            sold_count = sold_count + ?
-                        WHERE id = ?
-                    ");
-                    $updateStmt->execute([$item['quantity'], $item['quantity'], $product['id']]);
-                                // ========== STOCK NOTIFICATION ==========
-                                try {
-                                    // Calculate new stock
-                                    $newStock = (int)$product['stock_quantity'] - (int)$item['quantity'];
-                                    $minStock = (int)$product['min_stock_level'];
-                                    
-                                    // Create stock notification
-                                    NotificationHelper::createStockNotification(
-                                        $db,
-                                        $product['id'],
-                                        $product['name'],
-                                        $newStock,
-                                        $minStock
-                                    );
-                                    
-                                } catch (Exception $e) {
-                                    error_log('Stock notification error: ' . $e->getMessage());
-                                }
-                                // ========== END STOCK NOTIFICATION ==========
-                                }
-                
-                $db->commit();
-                
-                // Clear cart
-                unset($_SESSION['cart']);
-                
-                // Redirect to order confirmation
-                $redirectUrl = SITE_URL . 'orders/confirmation.php?order_id=' . $orderId . '&order_number=' . urlencode($orderNumber);
-                header('Location: ' . $redirectUrl);
-                exit();
-                
-            } else {
-                throw new Exception("Failed to get order ID after insertion");
-            }
-            
-        } catch (Exception $e) {
-            $db->rollBack();
-            error_log("Order creation failed: " . $e->getMessage());
-            $errors[] = 'Failed to create order. Please try again.';
-        }
+        return ['class' => 'success', 'text' => 'In Stock'];
     }
 }
 
-$pageTitle = "Checkout";
-
-require_once __DIR__ . '/../includes/header.php';
+// Set page title
+$pageTitle = "Premium Linen Collection | Timeless Style & Comfort";
+require_once 'includes/header.php';
 ?>
 
-<style>
-    :root {
-        --primary-blue: #0d6efd;
-        --secondary-blue: #0dcaf0;
-        --dark-blue: #052c65;
-        --light-blue: #cfe2ff;
-        --success-green: #198754;
-        --warning-orange: #ffc107;
-        --danger-red: #dc3545;
-    }
-    
-    /* Blue theme buttons */
-    .btn-primary-blue {
-        background-color: var(--primary-blue);
-        border-color: var(--primary-blue);
-        color: white;
-    }
-    
-    .btn-primary-blue:hover {
-        background-color: var(--dark-blue);
-        border-color: var(--dark-blue);
-        color: white;
-    }
-    
-    .btn-outline-blue {
-        color: var(--primary-blue);
-        border-color: var(--primary-blue);
-    }
-    
-    .btn-outline-blue:hover {
-        background-color: var(--primary-blue);
-        color: white;
-    }
-    
-    /* Text colors */
-    .text-blue {
-        color: var(--primary-blue) !important;
-    }
-    
-    .text-dark-blue {
-        color: var(--dark-blue) !important;
-    }
-    
-    /* Background colors */
-    .bg-blue-light {
-        background-color: var(--light-blue);
-    }
-    
-    .bg-blue {
-        background-color: var(--primary-blue) !important;
-    }
-    
-    /* Border colors */
-    .border-blue {
-        border-color: var(--primary-blue) !important;
-    }
-    
-    /* Checkout progress bar */
-    .progress {
-        height: 8px;
-        background-color: #e9ecef;
-        border-radius: 4px;
-        overflow: hidden;
-    }
-    
-    .progress-bar {
-        background-color: var(--primary-blue);
-    }
-    
-    /* Form controls */
-    .form-control:focus {
-        border-color: var(--primary-blue);
-        box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
-    }
-    
-    .form-check-input:checked {
-        background-color: var(--primary-blue);
-        border-color: var(--primary-blue);
-    }
-    
-    /* Card styling */
-    .card {
-        border: 1px solid #dee2e6;
-        transition: all 0.3s ease;
-    }
-    
-    .card:hover {
-        box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-    }
-    
-    .card-header {
-        background-color: white;
-        border-bottom: 2px solid var(--primary-blue);
-    }
-    
-    /* Order summary sticky */
-    .sticky-top {
-        position: -webkit-sticky;
-        position: sticky;
-        z-index: 1020;
-    }
-    
-    /* Payment method cards */
-    .payment-method-card {
-        cursor: pointer;
-        border: 2px solid transparent;
-        transition: all 0.3s ease;
-    }
-    
-    .payment-method-card:hover {
-        border-color: var(--primary-blue);
-        transform: translateY(-2px);
-    }
-    
-    .payment-method-card .form-check-input:checked + .card {
-        border-color: var(--primary-blue);
-        background-color: var(--light-blue);
-    }
-    
-    .shipping-method-card {
-        cursor: pointer;
-        border: 2px solid transparent;
-        transition: all 0.3s ease;
-    }
-    
-    .shipping-method-card:hover {
-        border-color: var(--primary-blue);
-        transform: translateY(-2px);
-    }
-    
-    /* Animation for price updates */
-    .price-update {
-        animation: pricePulse 0.5s ease-in-out;
-    }
-    
-    @keyframes pricePulse {
-        0% { transform: scale(1); }
-        50% { transform: scale(1.1); }
-        100% { transform: scale(1); }
-    }
-    
-    /* Form validation */
-    .is-invalid {
-        border-color: var(--danger-red) !important;
-    }
-    
-    .invalid-feedback {
-        display: none;
-        color: var(--danger-red);
-        font-size: 0.875em;
-        margin-top: 0.25rem;
-    }
-    
-    /* Responsive adjustments */
-    @media (max-width: 768px) {
-        .btn-lg {
-            padding: 0.75rem 1.5rem;
-            font-size: 1rem;
-        }
-        
-        .display-5 {
-            font-size: 2rem;
-        }
-        
-        .sticky-top {
-            position: static;
-        }
-    }
-    
-    /* Order items scroll */
-    .order-items-list {
-        max-height: 300px;
-        overflow-y: auto;
-        padding-right: 10px;
-    }
-    
-    .order-items-list::-webkit-scrollbar {
-        width: 5px;
-    }
-    
-    .order-items-list::-webkit-scrollbar-track {
-        background: #f1f1f1;
-    }
-    
-    .order-items-list::-webkit-scrollbar-thumb {
-        background: var(--primary-blue);
-        border-radius: 10px;
-    }
-</style>
-
-<div class="container-fluid py-4">
-    <!-- Breadcrumb -->
-    <nav aria-label="breadcrumb" class="mb-4">
-        <ol class="breadcrumb bg-blue-light p-3 rounded">
-            <li class="breadcrumb-item">
-                <a href="<?php echo SITE_URL; ?>" class="text-decoration-none text-blue">
-                    <i class="fas fa-home me-1"></i> Home
-                </a>
-            </li>
-            <li class="breadcrumb-item">
-                <a href="<?php echo SITE_URL; ?>cart" class="text-decoration-none text-blue">Cart</a>
-            </li>
-            <li class="breadcrumb-item active text-blue" aria-current="page">Checkout</li>
-        </ol>
-    </nav>
-    
-    <!-- Page Header -->
-    <div class="row mb-5">
-        <div class="col-12">
-            <h1 class="display-5 fw-bold mb-3 text-blue">Checkout</h1>
-            <div class="progress mb-3" style="height: 8px;">
-                <div class="progress-bar" role="progressbar" style="width: 33.33%;"></div>
+<!-- Hero Section with Slider -->
+<div class="hero-banner bg-gradient-primary text-white py-5 mb-5">
+    <div class="container">
+        <div class="row align-items-center">
+            <div class="col-lg-6">
+                <h1 class="display-4 fw-bold mb-3">Premium Linen Collection</h1>
+                <p class="lead mb-4">Discover comfort and elegance in every thread. Shop our curated collection of premium linens.</p>
+                <div class="d-flex flex-wrap gap-2">
+                    <a href="#new-arrivals" class="btn btn-light btn-lg px-4">
+                        <i class="fas fa-star me-2"></i>Shop New Arrivals
+                    </a>
+                    <a href="#categories" class="btn btn-outline-light btn-lg px-4">
+                        <i class="fas fa-list me-2"></i>Browse Categories
+                    </a>
+                </div>
             </div>
-            <div class="d-flex justify-content-between mt-2">
+            <div class="col-lg-6">
                 <div class="text-center">
-                    <div class="rounded-circle bg-blue text-white d-inline-flex align-items-center justify-content-center mb-2" 
-                         style="width: 30px; height: 30px;">
-                        1
-                    </div>
-                    <div class="fw-bold text-blue">Shipping</div>
-                </div>
-                <div class="text-center">
-                    <div class="rounded-circle bg-secondary text-white d-inline-flex align-items-center justify-content-center mb-2" 
-                         style="width: 30px; height: 30px;">
-                        2
-                    </div>
-                    <div class="text-muted">Payment</div>
-                </div>
-                <div class="text-center">
-                    <div class="rounded-circle bg-secondary text-white d-inline-flex align-items-center justify-content-center mb-2" 
-                         style="width: 30px; height: 30px;">
-                        3
-                    </div>
-                    <div class="text-muted">Confirmation</div>
+                    <i class="fas fa-couch fa-10x opacity-25"></i>
                 </div>
             </div>
         </div>
     </div>
-    
-    <!-- Error Messages -->
-    <?php if (!empty($errors)): ?>
-        <div class="alert alert-danger mb-4">
-            <h5><i class="fas fa-exclamation-triangle me-2"></i> Please fix the following errors:</h5>
-            <ul class="mb-0">
-                <?php foreach ($errors as $error): ?>
-                    <li><?php echo htmlspecialchars($error); ?></li>
-                <?php endforeach; ?>
-            </ul>
-        </div>
-    <?php endif; ?>
-    
-    <form method="POST" id="checkoutForm">
-        <div class="row">
-            <!-- Left Column - Forms -->
-            <div class="col-lg-8 mb-4">
-                <!-- Shipping Address -->
-                <div class="card border-blue shadow-sm mb-4">
-                    <div class="card-header bg-blue text-white py-3">
-                        <h5 class="fw-bold mb-0">
-                            <i class="fas fa-shipping-fast me-2"></i> Shipping Address
-                        </h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="row g-3">
-                            <div class="col-md-6">
-                                <label class="form-label fw-bold">Full Name <span class="text-danger">*</span></label>
-                                <input type="text" 
-                                       class="form-control" 
-                                       name="new_shipping_address[full_name]"
-                                       value="<?php echo htmlspecialchars($user['full_name'] ?? ''); ?>"
-                                       required>
-                                <div class="invalid-feedback">Full name is required</div>
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label fw-bold">Phone Number <span class="text-danger">*</span></label>
-                                <input type="tel" 
-                                       class="form-control" 
-                                       name="new_shipping_address[phone]"
-                                       value="<?php echo htmlspecialchars($user['phone'] ?? ''); ?>"
-                                       required>
-                                <div class="invalid-feedback">Phone number is required</div>
-                            </div>
-                            <div class="col-md-12">
-                                <label class="form-label fw-bold">Address Line 1 <span class="text-danger">*</span></label>
-                                <input type="text" 
-                                       class="form-control" 
-                                       name="new_shipping_address[address_line1]"
-                                       placeholder="Street address, P.O. Box, Company name"
-                                       required>
-                                <div class="invalid-feedback">Address line 1 is required</div>
-                            </div>
-                            <div class="col-md-12">
-                                <label class="form-label fw-bold">Address Line 2</label>
-                                <input type="text" 
-                                       class="form-control" 
-                                       name="new_shipping_address[address_line2]"
-                                       placeholder="Apartment, suite, unit, building, floor, etc.">
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label fw-bold">City <span class="text-danger">*</span></label>
-                                <input type="text" 
-                                       class="form-control" 
-                                       name="new_shipping_address[city]"
-                                       required>
-                                <div class="invalid-feedback">City is required</div>
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label fw-bold">State/Province <span class="text-danger">*</span></label>
-                                <input type="text" 
-                                       class="form-control" 
-                                       name="new_shipping_address[state]"
-                                       required>
-                                <div class="invalid-feedback">State/Province is required</div>
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label fw-bold">Postal Code <span class="text-danger">*</span></label>
-                                <input type="text" 
-                                       class="form-control" 
-                                       name="new_shipping_address[postal_code]"
-                                       required>
-                                <div class="invalid-feedback">Postal code is required</div>
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label fw-bold">Country <span class="text-danger">*</span></label>
-                                <select class="form-control" name="new_shipping_address[country]" required>
-                                    <option value="">Select Country</option>
-                                    <option value="Kenya" selected>Kenya</option>
-                                    <option value="Uganda">Uganda</option>
-                                    <option value="Tanzania">Tanzania</option>
-                                    <option value="Rwanda">Rwanda</option>
-                                    <option value="Burundi">Burundi</option>
-                                </select>
-                                <div class="invalid-feedback">Country is required</div>
-                            </div>
-                            
-                        </div>
-                        
-                    <!-- Shipping Information -->
-                    <div class="mt-4">
-                        <h6 class="fw-bold mb-3 text-dark-blue">Shipping Information</h6>
-                        <div class="alert alert-info" id="shippingInfoAlert">
-                            <p class="mb-2"><strong>Shipping to:</strong> <span id="currentCounty"><?php echo htmlspecialchars($userCounty); ?></span></p>
-                            <p class="mb-0"><strong>Cost:</strong> 
-                                <span id="currentShippingCost">
-                                    <?php if ($shipping > 0): ?>
-                                        Ksh <?php echo number_format($shipping, 2); ?>
-                                    <?php else: ?>
-                                        <span class="text-success">FREE</span>
-                                    <?php endif; ?>
-                                </span>
-                                <br>
-                                <small class="text-muted" id="currentShippingMessage"><?php echo htmlspecialchars($shippingMessage); ?></small>
-                            </p>
-                        </div>
-                    </div>
-                    
-                    </div>
-                </div>
-                
-                <!-- Payment Method -->
-                <div class="card border-blue shadow-sm mb-4">
-                    <div class="card-header bg-blue text-white py-3">
-                        <h5 class="fw-bold mb-0">
-                            <i class="fas fa-credit-card me-2"></i> Payment Method
-                        </h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="row g-3">
-                            <div class="col-md-6">
-                                <div class="card border h-100 payment-method-card">
-                                    <div class="card-body">
-                                        <div class="form-check">
-                                            <input class="form-check-input" 
-                                                   type="radio" 
-                                                   name="payment_method" 
-                                                   value="mpesa"
-                                                   id="payment-mpesa"
-                                                   checked>
-                                            <label class="form-check-label fw-bold" for="payment-mpesa">
-                                                <i class="fas fa-mobile-alt me-2 text-success"></i> M-Pesa
-                                            </label>
-                                            <div class="mt-2">
-                                                <p class="mb-0 small">Pay via M-Pesa mobile money</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="card border h-100 payment-method-card">
-                                    <div class="card-body">
-                                        <div class="form-check">
-                                            <input class="form-check-input" 
-                                                   type="radio" 
-                                                   name="payment_method" 
-                                                   value="card"
-                                                   id="payment-card">
-                                            <label class="form-check-label fw-bold" for="payment-card">
-                                                <i class="fas fa-credit-card me-2 text-primary"></i> Credit/Debit Card
-                                            </label>
-                                            <div class="mt-2">
-                                                <p class="mb-0 small">Pay with Visa, MasterCard, or American Express</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="card border h-100 payment-method-card">
-                                    <div class="card-body">
-                                        <div class="form-check">
-                                            <input class="form-check-input" 
-                                                   type="radio" 
-                                                   name="payment_method" 
-                                                   value="cash"
-                                                   id="payment-cash">
-                                            <label class="form-check-label fw-bold" for="payment-cash">
-                                                <i class="fas fa-money-bill-wave me-2 text-success"></i> Cash on Delivery
-                                            </label>
-                                            <div class="mt-2">
-                                                <p class="mb-0 small">Pay when you receive your order</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <!-- Payment Details (conditional) -->
-                        <div id="paymentDetails" class="mt-4" style="display: none;">
-                            <div id="mpesaDetails" class="payment-method-details">
-                                <h6 class="fw-bold mb-3 text-dark-blue">M-Pesa Payment Details</h6>
-                                <div class="alert alert-info">
-                                    <p class="mb-2"><strong>How to pay with M-Pesa:</strong></p>
-                                    <ol class="mb-0">
-                                        <li>Go to M-Pesa on your phone</li>
-                                        <li>Select "Lipa Na M-Pesa"</li>
-                                        <li>Select "Pay Bill"</li>
-                                        <li>Enter Business No: <strong>123456</strong></li>
-                                        <li>Enter Account No: <strong id="mpesaAccount"><?php echo $user['id'] ?? 'ORDER' . date('His'); ?></strong></li>
-                                        <li>Enter Amount: <strong>Ksh <span id="mpesaAmount"><?php echo number_format($total, 2); ?></span></strong></li>
-                                        <li>Enter your M-Pesa PIN</li>
-                                    </ol>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Navigation -->
-                <div class="d-flex justify-content-between">
-                    <a href="<?php echo SITE_URL; ?>cart" class="btn btn-outline-blue btn-lg">
-                        <i class="fas fa-arrow-left me-2"></i> Back to Cart
-                    </a>
-                    <button type="submit" class="btn btn-primary-blue btn-lg px-5" id="placeOrderBtn">
-                        Place Order <i class="fas fa-arrow-right ms-2"></i>
-                    </button>
-                </div>
-                </div>
-            
-            <!-- Right Column - Order Summary -->
-            <div class="col-lg-4">
-                <div class="card border-blue shadow-sm sticky-top" style="top: 100px;">
-                    <div class="card-header bg-blue text-white py-3">
-                        <h5 class="fw-bold mb-0">Order Summary</h5>
-                    </div>
-                    <div class="card-body">
-                        <!-- Order Items -->
-                        <div class="order-items mb-4">
-                            <h6 class="fw-bold mb-3 text-dark-blue">Items (<?php echo count($cartItems); ?>)</h6>
-                            <div class="order-items-list">
-                                <?php foreach ($cartItems as $item): ?>
-                                    <?php
-                                    $product = $item['product'];
-                                    $imageUrl = SITE_URL . ($product['primary_image'] ?: 'assets/images/placeholder.jpg');
-                                    ?>
-                                    <div class="d-flex mb-3 pb-3 border-bottom">
-                                        <div class="flex-shrink-0">
-                                            <img src="<?php echo $imageUrl; ?>" 
-                                                class="rounded border" 
-                                                style="width: 60px; height: 60px; object-fit: cover;"
-                                                alt="<?php echo htmlspecialchars($product['name']); ?>">
-                                        </div>
-                                        <div class="flex-grow-1 ms-3">
-                                            <h6 class="fw-bold mb-1 small text-dark">
-                                                <?php echo htmlspecialchars($product['name']); ?>
-                                            </h6>
-                                            <?php 
-                                            // Build variant description
-                                            $variantParts = [];
-                                            if (!empty($item['size'])) $variantParts[] = 'Size: ' . htmlspecialchars($item['size']);
-                                            if (!empty($item['color'])) $variantParts[] = 'Color: ' . htmlspecialchars($item['color']);
-                                            if (!empty($item['material'])) $variantParts[] = 'Material: ' . htmlspecialchars($item['material']);
-                                            
-                                            if (!empty($variantParts)): ?>
-                                                <small class="text-muted d-block">
-                                                    <?php echo implode(' • ', $variantParts); ?>
-                                                </small>
-                                            <?php endif; ?>
-                                            <div class="d-flex justify-content-between align-items-center mt-2">
-                                                <small class="text-muted">Qty: <?php echo $item['quantity']; ?></small>
-                                                <span class="fw-bold text-blue">
-                                                    Ksh <?php echo number_format($item['price'], 2); ?> × <?php echo $item['quantity']; ?> = 
-                                                    Ksh <?php echo number_format($item['total'], 2); ?>
-                                                </span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                <?php endforeach; ?>
-                            </div>
-                        </div>
-                        
-                        <!-- Order Totals -->
-                        <div class="order-totals mb-4">
-                            <div class="d-flex justify-content-between mb-2">
-                                <span class="text-muted">Subtotal</span>
-                                <span class="fw-bold text-dark-blue">Ksh <?php echo number_format($subtotal, 2); ?></span>
-                            </div>
-                           <div class="d-flex justify-content-between mb-2">
-                                <span class="text-muted">Shipping</span>
-                                <span class="fw-bold text-dark-blue" id="shippingSummary">
-                                    <?php if ($shipping > 0): ?>
-                                        Ksh <?php echo number_format($shipping, 2); ?>
-                                        <small class="d-block text-muted"><?php echo htmlspecialchars($shippingMessage); ?></small>
-                                    <?php else: ?>
-                                        <span class="text-success">FREE</span>
-                                        <small class="d-block text-muted"><?php echo htmlspecialchars($shippingMessage); ?></small>
-                                    <?php endif; ?>
-                                </span>
-                            </div>
-                            <div class="d-flex justify-content-between mb-3">
-                                <span class="text-muted">Tax (16% VAT)</span>
-                                <span class="fw-bold text-dark-blue">Ksh <?php echo number_format($tax, 2); ?></span>
-                            </div>
-                            <hr>
-                            <div class="d-flex justify-content-between mb-3">
-                                <span class="fw-bold fs-5 text-dark-blue">Total</span>
-                                <span class="fw-bold fs-5 text-blue" id="totalSummary">
-                                    Ksh <?php echo number_format($total, 2); ?>
-                                </span>
-                            </div>
-                        </div>
-                        
-                        <!-- Security Badge -->
-                        <div class="text-center">
-                            <small class="text-muted d-block mb-2">
-                                <i class="fas fa-shield-alt text-success me-1"></i>
-                                100% Secure Checkout
-                            </small>
-                            <small class="text-muted d-block mb-3">
-                                <i class="fas fa-lock text-success me-1"></i>
-                                Your payment information is encrypted
-                            </small>
-                            <div class="d-flex justify-content-center gap-2">
-                                <i class="fab fa-cc-visa fa-2x text-primary"></i>
-                                <i class="fab fa-cc-mastercard fa-2x text-danger"></i>
-                                <i class="fab fa-cc-paypal fa-2x text-info"></i>
-                                <i class="fab fa-cc-apple-pay fa-2x text-dark"></i>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Need Help? -->
-                <div class="card border-0 shadow-sm mt-4">
-                    <div class="card-body text-center">
-                        <h6 class="fw-bold mb-3 text-dark-blue">
-                            <i class="fas fa-question-circle me-2"></i> Need Help?
-                        </h6>
-                        <p class="small text-muted mb-3">
-                            Have questions about your order or need assistance?
-                        </p>
-                        <div class="d-grid gap-2">
-                            <a href="tel:+254700000000" class="btn btn-outline-blue btn-sm">
-                                <i class="fas fa-phone me-2"></i> Call Us
-                            </a>
-                            <a href="mailto:support@linencloset.com" class="btn btn-outline-blue btn-sm">
-                                <i class="fas fa-envelope me-2"></i> Email Us
-                            </a>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </form>
 </div>
 
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    // Initialize elements
-    const placeOrderBtn = document.getElementById('placeOrderBtn');
-    const checkoutForm = document.getElementById('checkoutForm');
-    
-    // Payment method selection
-    document.querySelectorAll('input[name="payment_method"]').forEach(radio => {
-        radio.addEventListener('change', function() {
-            updatePaymentDetails();
-            updatePaymentCardStyles();
-        });
-    });
-    
-    // Shipping method selection
-    document.querySelectorAll('input[name="shipping_method"]').forEach(radio => {
-        radio.addEventListener('change', function() {
-            updateShippingCost();
-            updateShippingCardStyles();
-        });
-    });
-    
-    // Form validation on input
-    const formInputs = checkoutForm.querySelectorAll('input[required], select[required]');
-    formInputs.forEach(input => {
-        input.addEventListener('blur', function() {
-            validateField(this);
-        });
-        
-        input.addEventListener('input', function() {
-            if (this.classList.contains('is-invalid')) {
-                validateField(this);
-            }
-        });
-    });
-    
-    // Place order button
-    if (placeOrderBtn) {
-        placeOrderBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            
-            if (validateForm()) {
-                // Show loading state
-                const originalText = this.innerHTML;
-                this.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> Processing...';
-                this.disabled = true;
-                
-                // Add a small delay to show loading state
-                setTimeout(() => {
-                    checkoutForm.submit();
-                }, 500);
-            }
-        });
-    }
-    
-    // Initialize
-    updatePaymentDetails();
-    updatePaymentCardStyles();
-    updateShippingCardStyles();
-    
-    // Set M-Pesa account number dynamically
-    const mpesaAccount = document.getElementById('mpesaAccount');
-    if (mpesaAccount) {
-        const userId = '<?php echo $user['id'] ?? ''; ?>';
-        const orderId = userId ? userId + Date.now().toString().slice(-4) : 'ORDER' + Date.now().toString().slice(-8);
-        mpesaAccount.textContent = orderId;
-    }
-});
 
-// Update payment details based on selection
-function updatePaymentDetails() {
-    const paymentMethod = document.querySelector('input[name="payment_method"]:checked')?.value;
-    const paymentDetails = document.getElementById('paymentDetails');
-    const allMethodDetails = document.querySelectorAll('.payment-method-details');
-    
-    allMethodDetails.forEach(detail => {
-        detail.style.display = 'none';
-    });
-    
-    if (paymentMethod === 'mpesa') {
-        const mpesaDetails = document.getElementById('mpesaDetails');
-        if (mpesaDetails) {
-            mpesaDetails.style.display = 'block';
-            paymentDetails.style.display = 'block';
-        }
-    } else {
-        paymentDetails.style.display = 'none';
-    }
-}
-
-// Update payment card styles
-function updatePaymentCardStyles() {
-    const selectedMethod = document.querySelector('input[name="payment_method"]:checked')?.value;
-    
-    document.querySelectorAll('.payment-method-card').forEach(card => {
-        const radio = card.querySelector('input[type="radio"]');
-        if (radio && radio.value === selectedMethod) {
-            card.classList.add('border-blue');
-            card.style.borderWidth = '2px';
-            card.style.backgroundColor = '#f8f9fa';
-        } else {
-            card.classList.remove('border-blue');
-            card.style.borderWidth = '1px';
-            card.style.backgroundColor = '';
-        }
-    });
-}
-
-// Update shipping card styles
-function updateShippingCardStyles() {
-    const selectedMethod = document.querySelector('input[name="shipping_method"]:checked')?.value;
-    
-    document.querySelectorAll('.shipping-method-card').forEach(card => {
-        const radio = card.querySelector('input[type="radio"]');
-        if (radio && radio.value === selectedMethod) {
-            card.classList.add('border-blue');
-            card.style.borderWidth = '2px';
-            card.style.backgroundColor = '#f8f9fa';
-        } else {
-            card.classList.remove('border-blue');
-            card.style.borderWidth = '1px';
-            card.style.backgroundColor = '';
-        }
-    });
-}
-
-// Update shipping cost
-function updateShippingCost() {
-    const shippingMethod = document.querySelector('input[name="shipping_method"]:checked')?.value;
-    const subtotal = <?php echo $subtotal; ?>;
-    
-    let shippingCost = 0;
-    
-    if (shippingMethod === 'standard') {
-        shippingCost = (subtotal >= 5000) ? 0 : 300;
-    } else if (shippingMethod === 'express') {
-        shippingCost = 700;
-    }
-    
-    // Update display
-    const shippingSummary = document.getElementById('shippingSummary');
-    const totalSummary = document.getElementById('totalSummary');
-    const mpesaAmount = document.getElementById('mpesaAmount');
-    
-    const tax = subtotal * 0.16;
-    const total = subtotal + shippingCost + tax;
-    
-    if (shippingSummary) {
-        shippingSummary.innerHTML = shippingCost === 0 
-            ? '<span class="text-success">FREE</span>'
-            : 'Ksh ' + shippingCost.toFixed(2);
-    }
-    
-    if (totalSummary) {
-        totalSummary.textContent = 'Ksh ' + total.toFixed(2);
-        totalSummary.classList.add('price-update');
-        setTimeout(() => {
-            totalSummary.classList.remove('price-update');
-        }, 500);
-    }
-    
-    if (mpesaAmount) {
-        mpesaAmount.textContent = total.toFixed(2);
-    }
-}
-
-// Validate individual field
-function validateField(field) {
-    const errorElement = field.parentNode.querySelector('.invalid-feedback') || 
-                         field.parentNode.parentNode.querySelector('.invalid-feedback');
-    
-    if (!field.value.trim()) {
-        field.classList.add('is-invalid');
-        if (errorElement) {
-            errorElement.style.display = 'block';
-        }
-        return false;
-    } else {
-        field.classList.remove('is-invalid');
-        if (errorElement) {
-            errorElement.style.display = 'none';
-        }
-        return true;
-    }
-}
-
-// Validate entire form
-function validateForm() {
-    let isValid = true;
-    const errors = [];
-    
-    // Check required fields
-    const requiredFields = [
-        { name: 'new_shipping_address[full_name]', label: 'Full Name' },
-        { name: 'new_shipping_address[phone]', label: 'Phone Number' },
-        { name: 'new_shipping_address[address_line1]', label: 'Address Line 1' },
-        { name: 'new_shipping_address[city]', label: 'City' },
-        { name: 'new_shipping_address[state]', label: 'State/Province' },
-        { name: 'new_shipping_address[postal_code]', label: 'Postal Code' },
-        { name: 'new_shipping_address[country]', label: 'Country' }
-    ];
-    
-    requiredFields.forEach(field => {
-        const input = document.querySelector(`[name="${field.name}"]`);
-        if (!input || !input.value.trim()) {
-            errors.push(`${field.label} is required`);
-            input.classList.add('is-invalid');
-            isValid = false;
-        } else {
-            input.classList.remove('is-invalid');
-        }
-    });
-    
-    // Check payment method
-    const paymentMethod = document.querySelector('input[name="payment_method"]:checked');
-    if (!paymentMethod) {
-        errors.push('Please select a payment method');
-        isValid = false;
-    }
-    
-    // Show errors if any
-    if (errors.length > 0) {
-        showErrorModal(errors);
-        return false;
-    }
-    
-    return isValid;
-}
-
-// Show error modal
-function showErrorModal(errors) {
-    // Create modal HTML
-    const modalHTML = `
-        <div class="modal fade" id="errorModal" tabindex="-1">
-            <div class="modal-dialog">
-                <div class="modal-content">
-                    <div class="modal-header border-0 bg-blue text-white">
-                        <h5 class="modal-title">
-                            <i class="fas fa-exclamation-triangle me-2"></i> Please fix the following errors:
-                        </h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+<!-- Features Bar -->
+<section class="py-4 bg-light border-bottom">
+    <div class="container px-0">
+        <div class="row g-4">
+            <div class="col-md-3 col-sm-6">
+                <div class="d-flex align-items-center">
+                    <div class="feature-icon bg-dark text-light rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 50px; height: 50px;">
+                        <i class="fas fa-truck fa-lg"></i>
                     </div>
-                    <div class="modal-body">
-                        <div class="alert alert-danger">
-                            <ul class="mb-0">
-                                ${errors.map(error => `<li>${error}</li>`).join('')}
-                            </ul>
-                        </div>
+                    <div>
+                        <h6 class="fw-bold mb-1">Free Shipping</h6>
+                        <small class="text-muted">On orders over Ksh 5,000</small>
                     </div>
-                    <div class="modal-footer border-0">
-                        <button type="button" class="btn btn-primary-blue" data-bs-dismiss="modal">OK</button>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="d-flex align-items-center">
+                    <div class="feature-icon bg-dark text-light rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 50px; height: 50px;">
+                        <i class="fas fa-shield-alt fa-lg"></i>
+                    </div>
+                    <div>
+                        <h6 class="fw-bold mb-1">Secure Payment</h6>
+                        <small class="text-muted">100% secure checkout</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="d-flex align-items-center">
+                    <div class="feature-icon bg-dark text-light rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 50px; height: 50px;">
+                        <i class="fas fa-undo fa-lg"></i>
+                    </div>
+                    <div>
+                        <h6 class="fw-bold mb-1">Easy Returns</h6>
+                        <small class="text-muted">30-day return policy</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="d-flex align-items-center">
+                    <div class="feature-icon bg-dark text-light rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 50px; height: 50px;">
+                        <i class="fas fa-headset fa-lg"></i>
+                    </div>
+                    <div>
+                        <h6 class="fw-bold mb-1">24/7 Support</h6>
+                        <small class="text-muted">Dedicated customer service</small>
                     </div>
                 </div>
             </div>
         </div>
-    `;
-    
-    // Remove existing modal if any
-    const existingModal = document.getElementById('errorModal');
-    if (existingModal) {
-        existingModal.remove();
-    }
-    
-    // Add modal to body
-    document.body.insertAdjacentHTML('beforeend', modalHTML);
-    
-    // Show modal
-    const modal = new bootstrap.Modal(document.getElementById('errorModal'));
-    modal.show();
-}
+    </div>
+</section>
 
-// Add smooth scrolling for order items
-function scrollToElement(elementId) {
-    const element = document.getElementById(elementId);
-    if (element) {
-        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
+<!-- Categories Section -->
+<section class="py-5 py-lg-7">
+    <div class="container px-0">
+        <div class="text-center mb-5">
+            <h2 class="display-5 fw-bold mb-3">Shop by Category</h2>
+            <p class="text-muted lead">Find your perfect style in our curated collections</p>
+        </div>
+        <div class="row g-4">
+            <?php if (!empty($categories)): ?>
+                <?php foreach($categories as $category): ?>
+                <div class="col-md-4 col-lg-2">
+                    <a href="<?php echo SITE_URL; ?>products/category/<?php echo $category['slug'] ?? $category['id']; ?>" 
+                       class="category-card text-decoration-none">
+                        <div class="position-relative overflow-hidden rounded-3 mb-3">
+                            <div class="category-image-wrapper" style="height: 200px; overflow: hidden;">
+                                <img src="<?php echo $category['image_url'] ? SITE_URL . $category['image_url'] : SITE_URL . 'assets/images/category-placeholder.jpg'; ?>" 
+                                     alt="<?php echo htmlspecialchars($category['name']); ?>" 
+                                     class="img-fluid w-100 h-100 object-fit-cover category-image">
+                            </div>
+                            <div class="category-overlay position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center">
+                                <div class="text-center text-light">
+                                    <h3 class="h5 fw-bold mb-2"><?php echo htmlspecialchars($category['name']); ?></h3>
+                                    <span class="badge bg-light text-dark"><?php echo $category['product_count']; ?> items</span>
+                                </div>
+                            </div>
+                        </div>
+                        <h4 class="h6 text-center mb-0"><?php echo htmlspecialchars($category['name']); ?></h4>
+                    </a>
+                </div>
+                <?php endforeach; ?>
+            <?php else: ?>
+                <div class="col-12 text-center">
+                    <p class="text-muted">Categories coming soon!</p>
+                </div>
+            <?php endif; ?>
+        </div>
+    </div>
+</section>
 
-
-// Update shipping when county changes
-document.getElementById('countySelect')?.addEventListener('change', function() {
-    const county = this.value;
-    const otherCountyDiv = document.getElementById('otherCountyDiv');
-    const otherCountyInput = document.getElementById('otherCountyInput');
-    
-    // Show/hide "Other" field
-    if (county === 'Other') {
-        otherCountyDiv.style.display = 'block';
-        if (otherCountyInput) {
-            otherCountyInput.required = true;
-        }
-    } else {
-        otherCountyDiv.style.display = 'none';
-        if (otherCountyInput) {
-            otherCountyInput.required = false;
-            otherCountyInput.value = '';
-        }
-        // Update shipping immediately
-        updateShippingByCounty(county);
-    }
-});
-
-// Update shipping when "Other" county is entered
-document.getElementById('otherCountyInput')?.addEventListener('input', function() {
-    const otherCounty = this.value.trim();
-    if (otherCounty.length > 2) {
-        updateShippingByCounty(otherCounty);
-    }
-});
-
-// Update shipping based on county
-async function updateShippingByCounty(county) {
-    if (!county || county === '' || county === 'Other') return;
-    
-    const subtotal = <?php echo $subtotal; ?>;
-    
-    try {
-        const response = await fetch('<?php echo SITE_URL; ?>ajax/calculate-shipping.php', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                county: county,
-                subtotal: subtotal
-            })
-        });
+<!-- New Arrivals Section with Carousel -->
+<section class="py-5 py-lg-7 bg-light">
+    <div class="container px-0">
+        <div class="d-flex justify-content-between align-items-center mb-5">
+            <div>
+                <h2 class="display-5 fw-bold mb-2">New Arrivals</h2>
+                <p class="text-muted">Fresh styles just landed</p>
+            </div>
+            <?php if (!empty($newArrivals)): ?>
+            <a href="<?php echo SITE_URL; ?>products?sort=newest" class="btn btn-outline-primary">
+                View All <i class="fas fa-arrow-right ms-2"></i>
+            </a>
+            <?php endif; ?>
+        </div>
         
-        const data = await response.json();
-        
-        if (data.success) {
-            // Update hidden fields
-            document.getElementById('shippingZoneId').value = data.zone_id || '';
-            document.getElementById('shippingCost').value = data.cost || 0;
-            document.getElementById('shippingMessage').value = data.message || 'Standard shipping';
+        <?php if (!empty($newArrivals)): ?>
+        <div id="newArrivalsCarousel" class="carousel slide" data-bs-ride="carousel">
+            <div class="carousel-inner">
+                <?php 
+                $chunks = array_chunk($newArrivals, 4);
+                foreach($chunks as $index => $chunk): 
+                ?>
+                <div class="carousel-item <?php echo $index === 0 ? 'active' : ''; ?>">
+                    <div class="row g-4">
+                        <?php foreach($chunk as $product): 
+                            $stockStatus = getStockStatus($product['total_variant_stock'] ?? $product['stock_quantity'] ?? 0);
+                            $hasVariants = !empty($product['variant_min_price']) && !empty($product['variant_max_price']);
+                            $priceDisplay = $hasVariants && $product['variant_min_price'] != $product['variant_max_price'] 
+                                ? formatPrice($product['variant_min_price']) . " - " . formatPrice($product['variant_max_price'])
+                                : formatPrice($product['display_price'] ?? $product['price']);
+                        ?>
+                        <div class="col-xl-3 col-lg-4 col-md-6">
+                            <div class="card product-card h-100 border-0 shadow-sm hover-lift">
+                                <!-- Product Image -->
+                                <div class="position-relative overflow-hidden" style="height: 300px;">
+                                    <a href="<?php echo SITE_URL; ?>products/detail.php?slug=<?php echo $product['slug']; ?>" class="text-decoration-none">
+                                        <img src="<?php echo $product['primary_image'] ? SITE_URL . $product['primary_image'] : SITE_URL . 'assets/images/placeholder.jpg'; ?>" 
+                                             class="card-img-top h-100 w-100 object-fit-cover product-image" 
+                                             alt="<?php echo htmlspecialchars($product['name']); ?>"
+                                             onerror="this.onerror=null; this.src='<?php echo SITE_URL; ?>assets/images/placeholder.jpg';">
+                                        <!-- Quick View Overlay -->
+                                        <div class="product-overlay position-absolute top-0 start-0 w-100 h-100 bg-dark bg-opacity-10 d-flex align-items-center justify-content-center opacity-0">
+                                            <button class="btn btn-primary rounded-pill px-4 quick-view-btn" 
+                                                    data-product-id="<?php echo $product['id']; ?>">
+                                                Quick View
+                                            </button>
+                                        </div>
+                                    </a>
+                                    
+                                    <!-- Badges -->
+                                    <div class="position-absolute top-0 start-0 m-3">
+                                        <?php if ($stockStatus['text'] === 'Out of Stock'): ?>
+                                            <span class="badge bg-secondary">Out of Stock</span>
+                                        <?php endif; ?>
+                                        <?php if (isset($product['compare_price']) && $product['compare_price'] > $product['price']): ?>
+                                            <span class="badge bg-danger">Sale</span>
+                                        <?php endif; ?>
+                                        <?php if (strtotime($product['created_at']) > strtotime('-7 days')): ?>
+                                            <span class="badge bg-success">New</span>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                                
+                                <!-- Card Body -->
+                                <div class="card-body d-flex flex-column p-4">
+                                    <!-- Category -->
+                                    <div class="mb-2">
+                                        <small class="text-muted">
+                                            <?php if (!empty($product['category_name'])): ?>
+                                                <?php echo htmlspecialchars($product['category_name']); ?>
+                                            <?php endif; ?>
+                                        </small>
+                                    </div>
+                                    
+                                    <!-- Product Title -->
+                                    <h6 class="card-title fw-bold mb-2">
+                                        <a href="<?php echo SITE_URL; ?>products/detail.php?slug=<?php echo $product['slug']; ?>" 
+                                           class="text-decoration-none text-dark text-truncate-2">
+                                            <?php echo htmlspecialchars($product['name']); ?>
+                                        </a>
+                                    </h6>
+                                    
+                                    <!-- Stock Status -->
+                                    <div class="mb-3">
+                                        <span class="badge bg-<?php echo $stockStatus['class']; ?>">
+                                            <i class="fas fa-<?php echo $stockStatus['text'] === 'Out of Stock' ? 'times' : 'check'; ?> me-1"></i>
+                                            <?php echo $stockStatus['text']; ?>
+                                        </span>
+                                    </div>
+                                    
+                                    <!-- Price -->
+                                    <div class="mt-auto">
+                                        <div class="d-flex justify-content-between align-items-center mb-3">
+                                            <div>
+                                                <h5 class="text-dark mb-0"><?php echo $priceDisplay; ?></h5>
+                                                <?php if (isset($product['compare_price']) && $product['compare_price'] > $product['price']): ?>
+                                                    <small class="text-muted text-decoration-line-through">
+                                                        <?php echo formatPrice($product['compare_price']); ?>
+                                                    </small>
+                                                <?php endif; ?>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- Add to Cart Button -->
+                                        <button type="button" 
+                                                class="btn btn-primary w-100 add-to-cart-btn"
+                                                data-product-id="<?php echo $product['id']; ?>"
+                                                data-product-name="<?php echo htmlspecialchars($product['name']); ?>"
+                                                <?php echo $stockStatus['text'] === 'Out of Stock' ? 'disabled' : ''; ?>>
+                                            <i class="fas fa-shopping-cart me-2"></i>
+                                            <?php echo $stockStatus['text'] === 'Out of Stock' ? 'Out of Stock' : 'Add to Cart'; ?>
+                                        </button>
+                                        
+                                     
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+            </div>
             
-            // Update shipping cost display
-            updateShippingDisplay(county, data.cost, data.message, data.delivery_days);
-        }
-    } catch (error) {
-        console.error('Update shipping error:', error);
+            <?php if (count($chunks) > 1): ?>
+            <!-- Carousel Controls -->
+            <button class="carousel-control-prev" type="button" data-bs-target="#newArrivalsCarousel" data-bs-slide="prev">
+                <span class="carousel-control-prev-icon bg-dark rounded-circle p-3" aria-hidden="true"></span>
+                <span class="visually-hidden">Previous</span>
+            </button>
+            <button class="carousel-control-next" type="button" data-bs-target="#newArrivalsCarousel" data-bs-slide="next">
+                <span class="carousel-control-next-icon bg-dark rounded-circle p-3" aria-hidden="true"></span>
+                <span class="visually-hidden">Next</span>
+            </button>
+            
+            <!-- Carousel Indicators -->
+            <div class="carousel-indicators position-static mt-4">
+                <?php for($i = 0; $i < count($chunks); $i++): ?>
+                <button type="button" 
+                        data-bs-target="#newArrivalsCarousel" 
+                        data-bs-slide-to="<?php echo $i; ?>" 
+                        class="<?php echo $i === 0 ? 'active' : ''; ?> bg-dark" 
+                        style="width: 12px; height: 12px; border-radius: 50%;"></button>
+                <?php endfor; ?>
+            </div>
+            <?php endif; ?>
+        </div>
+        <?php else: ?>
+        <div class="text-center py-5">
+            <i class="fas fa-box-open fa-3x text-muted mb-3"></i>
+            <h5>No New Arrivals Yet</h5>
+            <p class="text-muted">Check back soon for new products!</p>
+        </div>
+        <?php endif; ?>
+    </div>
+</section>
+
+<!-- Best Sellers Section with Carousel -->
+<section class="py-5 py-lg-7">
+    <div class="container px-0">
+        <div class="d-flex justify-content-between align-items-center mb-5">
+            <div>
+                <h2 class="display-5 fw-bold mb-2">Best Sellers</h2>
+                <p class="text-muted">Most loved by our customers</p>
+            </div>
+            <?php if (!empty($bestSellers)): ?>
+            <a href="<?php echo SITE_URL; ?>products?sort=best_selling" class="btn btn-outline-primary">
+                View All <i class="fas fa-arrow-right ms-2"></i>
+            </a>
+            <?php endif; ?>
+        </div>
+        
+        <?php if (!empty($bestSellers)): ?>
+        <div id="bestSellersCarousel" class="carousel slide" data-bs-ride="carousel">
+            <div class="carousel-inner">
+                <?php 
+                $chunks = array_chunk($bestSellers, 4);
+                foreach($chunks as $index => $chunk): 
+                ?>
+                <div class="carousel-item <?php echo $index === 0 ? 'active' : ''; ?>">
+                    <div class="row g-4">
+                        <?php foreach($chunk as $product): 
+                            $stockStatus = getStockStatus($product['total_variant_stock'] ?? $product['stock_quantity'] ?? 0);
+                            $hasVariants = !empty($product['variant_min_price']) && !empty($product['variant_max_price']);
+                            $priceDisplay = $hasVariants && $product['variant_min_price'] != $product['variant_max_price'] 
+                                ? formatPrice($product['variant_min_price']) . " - " . formatPrice($product['variant_max_price'])
+                                : formatPrice($product['display_price'] ?? $product['price']);
+                        ?>
+                        <div class="col-xl-3 col-lg-4 col-md-6">
+                            <div class="card product-card h-100 border-0 shadow-sm hover-lift">
+                                <!-- Product Image -->
+                                <div class="position-relative overflow-hidden" style="height: 300px;">
+                                    <a href="<?php echo SITE_URL; ?>products/detail.php?slug=<?php echo $product['slug']; ?>" class="text-decoration-none">
+                                        <img src="<?php echo $product['primary_image'] ? SITE_URL . $product['primary_image'] : SITE_URL . 'assets/images/placeholder.jpg'; ?>" 
+                                             class="card-img-top h-100 w-100 object-fit-cover product-image" 
+                                             alt="<?php echo htmlspecialchars($product['name']); ?>"
+                                             onerror="this.onerror=null; this.src='<?php echo SITE_URL; ?>assets/images/placeholder.jpg';">
+                                        <!-- Quick View Overlay -->
+                                        <div class="product-overlay position-absolute top-0 start-0 w-100 h-100 bg-dark bg-opacity-10 d-flex align-items-center justify-content-center opacity-0">
+                                            <button class="btn btn-primary rounded-pill px-4 quick-view-btn" 
+                                                    data-product-id="<?php echo $product['id']; ?>">
+                                                Quick View
+                                            </button>
+                                        </div>
+                                    </a>
+                                    
+                                    <!-- Badges -->
+                                    <div class="position-absolute top-0 start-0 m-3">
+                                        <?php if ($stockStatus['text'] === 'Out of Stock'): ?>
+                                            <span class="badge bg-secondary">Out of Stock</span>
+                                        <?php endif; ?>
+                                        <?php if (isset($product['compare_price']) && $product['compare_price'] > $product['price']): ?>
+                                            <span class="badge bg-danger">Sale</span>
+                                        <?php endif; ?>
+                                        <span class="badge bg-warning text-dark">
+                                            <i class="fas fa-fire me-1"></i> Bestseller
+                                        </span>
+                                    </div>
+                                </div>
+                                
+                                <!-- Card Body -->
+                                <div class="card-body d-flex flex-column p-4">
+                                    <!-- Category -->
+                                    <div class="mb-2">
+                                        <small class="text-muted">
+                                            <?php if (!empty($product['category_name'])): ?>
+                                                <?php echo htmlspecialchars($product['category_name']); ?>
+                                            <?php endif; ?>
+                                        </small>
+                                    </div>
+                                    
+                                    <!-- Product Title -->
+                                    <h6 class="card-title fw-bold mb-2">
+                                        <a href="<?php echo SITE_URL; ?>products/detail.php?slug=<?php echo $product['slug']; ?>" 
+                                           class="text-decoration-none text-dark text-truncate-2">
+                                            <?php echo htmlspecialchars($product['name']); ?>
+                                        </a>
+                                    </h6>
+                                    
+                                    <!-- Stock Status -->
+                                    <div class="mb-3">
+                                        <span class="badge bg-<?php echo $stockStatus['class']; ?>">
+                                            <i class="fas fa-<?php echo $stockStatus['text'] === 'Out of Stock' ? 'times' : 'check'; ?> me-1"></i>
+                                            <?php echo $stockStatus['text']; ?>
+                                        </span>
+                                    </div>
+                                    
+                                    <!-- Price -->
+                                    <div class="mt-auto">
+                                        <div class="d-flex justify-content-between align-items-center mb-3">
+                                            <div>
+                                                <h5 class="text-dark mb-0"><?php echo $priceDisplay; ?></h5>
+                                                <?php if (isset($product['compare_price']) && $product['compare_price'] > $product['price']): ?>
+                                                    <small class="text-muted text-decoration-line-through">
+                                                        <?php echo formatPrice($product['compare_price']); ?>
+                                                    </small>
+                                                <?php endif; ?>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- Add to Cart Button -->
+                                        <button type="button" 
+                                                class="btn btn-primary w-100 add-to-cart-btn"
+                                                data-product-id="<?php echo $product['id']; ?>"
+                                                data-product-name="<?php echo htmlspecialchars($product['name']); ?>"
+                                                <?php echo $stockStatus['text'] === 'Out of Stock' ? 'disabled' : ''; ?>>
+                                            <i class="fas fa-shopping-cart me-2"></i>
+                                            <?php echo $stockStatus['text'] === 'Out of Stock' ? 'Out of Stock' : 'Add to Cart'; ?>
+                                        </button>
+                                        
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+            </div>
+            
+            <?php if (count($chunks) > 1): ?>
+            <!-- Carousel Controls -->
+            <button class="carousel-control-prev" type="button" data-bs-target="#bestSellersCarousel" data-bs-slide="prev">
+                <span class="carousel-control-prev-icon bg-dark rounded-circle p-3" aria-hidden="true"></span>
+                <span class="visually-hidden">Previous</span>
+            </button>
+            <button class="carousel-control-next" type="button" data-bs-target="#bestSellersCarousel" data-bs-slide="next">
+                <span class="carousel-control-next-icon bg-dark rounded-circle p-3" aria-hidden="true"></span>
+                <span class="visually-hidden">Next</span>
+            </button>
+            
+            <!-- Carousel Indicators -->
+            <div class="carousel-indicators position-static mt-4">
+                <?php for($i = 0; $i < count($chunks); $i++): ?>
+                <button type="button" 
+                        data-bs-target="#bestSellersCarousel" 
+                        data-bs-slide-to="<?php echo $i; ?>" 
+                        class="<?php echo $i === 0 ? 'active' : ''; ?> bg-dark" 
+                        style="width: 12px; height: 12px; border-radius: 50%;"></button>
+                <?php endfor; ?>
+            </div>
+            <?php endif; ?>
+        </div>
+        <?php else: ?>
+        <div class="text-center py-5">
+            <i class="fas fa-star fa-3x text-muted mb-3"></i>
+            <h5>No Products Yet</h5>
+            <p class="text-muted">Products will appear here soon!</p>
+        </div>
+        <?php endif; ?>
+    </div>
+</section>
+
+<!-- Sale Products Section with Carousel -->
+<section class="py-5 py-lg-7 bg-light">
+    <div class="container px-0">
+        <div class="d-flex justify-content-between align-items-center mb-5">
+            <div>
+                <h2 class="display-5 fw-bold mb-2">On Sale</h2>
+                <p class="text-muted">Limited time offers</p>
+            </div>
+            <?php if (!empty($saleProducts)): ?>
+            <a href="<?php echo SITE_URL; ?>products?filter=on_sale" class="btn btn-outline-primary">
+                View All <i class="fas fa-arrow-right ms-2"></i>
+            </a>
+            <?php endif; ?>
+        </div>
+        
+        <?php if (!empty($saleProducts)): ?>
+        <div id="saleProductsCarousel" class="carousel slide" data-bs-ride="carousel">
+            <div class="carousel-inner">
+                <?php 
+                $chunks = array_chunk($saleProducts, 4);
+                foreach($chunks as $index => $chunk): 
+                ?>
+                <div class="carousel-item <?php echo $index === 0 ? 'active' : ''; ?>">
+                    <div class="row g-4">
+                        <?php foreach($chunk as $product): 
+                            $stockStatus = getStockStatus($product['total_variant_stock'] ?? $product['stock_quantity'] ?? 0);
+                            $hasVariants = !empty($product['variant_min_price']) && !empty($product['variant_max_price']);
+                            $priceDisplay = $hasVariants && $product['variant_min_price'] != $product['variant_max_price'] 
+                                ? formatPrice($product['variant_min_price']) . " - " . formatPrice($product['variant_max_price'])
+                                : formatPrice($product['display_price'] ?? $product['price']);
+                            $discountPercent = isset($product['compare_price']) && $product['compare_price'] > $product['price']
+                                ? round((($product['compare_price'] - $product['price']) / $product['compare_price']) * 100)
+                                : 0;
+                        ?>
+                        <div class="col-xl-3 col-lg-4 col-md-6">
+                            <div class="card product-card h-100 border-0 shadow-sm hover-lift">
+                                <!-- Product Image -->
+                                <div class="position-relative overflow-hidden" style="height: 300px;">
+                                    <a href="<?php echo SITE_URL; ?>products/detail.php?slug=<?php echo $product['slug']; ?>" class="text-decoration-none">
+                                        <img src="<?php echo $product['primary_image'] ? SITE_URL . $product['primary_image'] : SITE_URL . 'assets/images/placeholder.jpg'; ?>" 
+                                             class="card-img-top h-100 w-100 object-fit-cover product-image" 
+                                             alt="<?php echo htmlspecialchars($product['name']); ?>"
+                                             onerror="this.onerror=null; this.src='<?php echo SITE_URL; ?>assets/images/placeholder.jpg';">
+                                        <!-- Quick View Overlay -->
+                                        <div class="product-overlay position-absolute top-0 start-0 w-100 h-100 bg-dark bg-opacity-10 d-flex align-items-center justify-content-center opacity-0">
+                                            <button class="btn btn-primary rounded-pill px-4 quick-view-btn" 
+                                                    data-product-id="<?php echo $product['id']; ?>">
+                                                Quick View
+                                            </button>
+                                        </div>
+                                    </a>
+                                    
+                                    <!-- Badges -->
+                                    <div class="position-absolute top-0 start-0 m-3">
+                                        <?php if ($discountPercent > 0): ?>
+                                            <span class="badge bg-danger">-<?php echo $discountPercent; ?>%</span>
+                                        <?php endif; ?>
+                                        <?php if ($stockStatus['text'] === 'Out of Stock'): ?>
+                                            <span class="badge bg-secondary">Out of Stock</span>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                                
+                                <!-- Card Body -->
+                                <div class="card-body d-flex flex-column p-4">
+                                    <!-- Category -->
+                                    <div class="mb-2">
+                                        <small class="text-muted">
+                                            <?php if (!empty($product['category_name'])): ?>
+                                                <?php echo htmlspecialchars($product['category_name']); ?>
+                                            <?php endif; ?>
+                                        </small>
+                                    </div>
+                                    
+                                    <!-- Product Title -->
+                                    <h6 class="card-title fw-bold mb-2">
+                                        <a href="<?php echo SITE_URL; ?>products/detail.php?slug=<?php echo $product['slug']; ?>" 
+                                           class="text-decoration-none text-dark text-truncate-2">
+                                            <?php echo htmlspecialchars($product['name']); ?>
+                                        </a>
+                                    </h6>
+                                    
+                                    <!-- Stock Status -->
+                                    <div class="mb-3">
+                                        <span class="badge bg-<?php echo $stockStatus['class']; ?>">
+                                            <i class="fas fa-<?php echo $stockStatus['text'] === 'Out of Stock' ? 'times' : 'check'; ?> me-1"></i>
+                                            <?php echo $stockStatus['text']; ?>
+                                        </span>
+                                    </div>
+                                    
+                                    <!-- Price -->
+                                    <div class="mt-auto">
+                                        <div class="d-flex justify-content-between align-items-center mb-3">
+                                            <div>
+                                                <h5 class="text-dark mb-0"><?php echo $priceDisplay; ?></h5>
+                                                <?php if (isset($product['compare_price']) && $product['compare_price'] > $product['price']): ?>
+                                                    <small class="text-muted text-decoration-line-through">
+                                                        <?php echo formatPrice($product['compare_price']); ?>
+                                                    </small>
+                                                    <span class="badge bg-danger ms-1">Save <?php echo $discountPercent; ?>%</span>
+                                                <?php endif; ?>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- Add to Cart Button -->
+                                        <button type="button" 
+                                                class="btn btn-primary w-100 add-to-cart-btn"
+                                                data-product-id="<?php echo $product['id']; ?>"
+                                                data-product-name="<?php echo htmlspecialchars($product['name']); ?>"
+                                                <?php echo $stockStatus['text'] === 'Out of Stock' ? 'disabled' : ''; ?>>
+                                            <i class="fas fa-shopping-cart me-2"></i>
+                                            <?php echo $stockStatus['text'] === 'Out of Stock' ? 'Out of Stock' : 'Add to Cart'; ?>
+                                        </button>
+                                        
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+            </div>
+            
+            <?php if (count($chunks) > 1): ?>
+            <!-- Carousel Controls -->
+            <button class="carousel-control-prev" type="button" data-bs-target="#saleProductsCarousel" data-bs-slide="prev">
+                <span class="carousel-control-prev-icon bg-dark rounded-circle p-3" aria-hidden="true"></span>
+                <span class="visually-hidden">Previous</span>
+            </button>
+            <button class="carousel-control-next" type="button" data-bs-target="#saleProductsCarousel" data-bs-slide="next">
+                <span class="carousel-control-next-icon bg-dark rounded-circle p-3" aria-hidden="true"></span>
+                <span class="visually-hidden">Next</span>
+            </button>
+            
+            <!-- Carousel Indicators -->
+            <div class="carousel-indicators position-static mt-4">
+                <?php for($i = 0; $i < count($chunks); $i++): ?>
+                <button type="button" 
+                        data-bs-target="#saleProductsCarousel" 
+                        data-bs-slide-to="<?php echo $i; ?>" 
+                        class="<?php echo $i === 0 ? 'active' : ''; ?> bg-dark" 
+                        style="width: 12px; height: 12px; border-radius: 50%;"></button>
+                <?php endfor; ?>
+            </div>
+            <?php endif; ?>
+        </div>
+        <?php else: ?>
+        <div class="text-center py-5">
+            <i class="fas fa-tags fa-3x text-muted mb-3"></i>
+            <h5>No Sale Items Available</h5>
+            <p class="text-muted">Check back for special offers!</p>
+        </div>
+        <?php endif; ?>
+    </div>
+</section>
+
+<!-- Sale Banner -->
+<section class="py-5 py-lg-7 bg-gradient-primary text-white">
+    <div class="container px-0">
+        <div class="row align-items-center">
+            <div class="col-lg-6 mb-5 mb-lg-0">
+                <span class="badge bg-light text-primary mb-3 px-3 py-2 rounded-pill">Limited Time</span>
+                <h2 class="display-4 fw-bold mb-4">Summer Sale<br>Up to 50% Off</h2>
+                <p class="lead mb-5">Refresh your wardrobe with our premium linen collection at amazing prices.</p>
+                
+                <div class="sale-countdown mb-5">
+                    <div class="d-flex align-items-center">
+                        <div class="text-center me-4">
+                            <div class="countdown-box bg-light text-dark rounded-3 d-flex align-items-center justify-content-center p-3" style="width: 80px; height: 80px;">
+                                <div>
+                                    <div class="fs-3 fw-bold" id="saleDays">00</div>
+                                    <small>Days</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="text-center me-4">
+                            <div class="countdown-box bg-light text-dark rounded-3 d-flex align-items-center justify-content-center p-3" style="width: 80px; height: 80px;">
+                                <div>
+                                    <div class="fs-3 fw-bold" id="saleHours">00</div>
+                                    <small>Hours</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="text-center me-4">
+                            <div class="countdown-box bg-light text-dark rounded-3 d-flex align-items-center justify-content-center p-3" style="width: 80px; height: 80px;">
+                                <div>
+                                    <div class="fs-3 fw-bold" id="saleMinutes">00</div>
+                                    <small>Mins</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="text-center">
+                            <div class="countdown-box bg-light text-dark rounded-3 d-flex align-items-center justify-content-center p-3" style="width: 80px; height: 80px;">
+                                <div>
+                                    <div class="fs-3 fw-bold" id="saleSeconds">00</div>
+                                    <small>Secs</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <a href="<?php echo SITE_URL; ?>products?filter=on_sale" class="btn btn-light btn-lg px-5 py-3">
+                    Shop Sale <i class="fas fa-arrow-right ms-2"></i>
+                </a>
+            </div>
+            <div class="col-lg-6">
+                <div class="row g-3">
+                    <?php if (!empty($saleProducts)): ?>
+                        <?php 
+                        $saleProductsPreview = array_slice($saleProducts, 0, 4);
+                        foreach($saleProductsPreview as $saleProduct): 
+                            $discountPercent = isset($saleProduct['compare_price']) && $saleProduct['compare_price'] > $saleProduct['price']
+                                ? round((($saleProduct['compare_price'] - $saleProduct['price']) / $saleProduct['compare_price']) * 100)
+                                : 0;
+                        ?>
+                        <div class="col-6">
+                            <div class="sale-product-card position-relative overflow-hidden rounded-3">
+                                <a href="<?php echo SITE_URL; ?>products/detail.php?slug=<?php echo $saleProduct['slug']; ?>">
+                                    <img src="<?php echo $saleProduct['primary_image'] ? SITE_URL . $saleProduct['primary_image'] : SITE_URL . 'assets/images/placeholder.jpg'; ?>" 
+                                         alt="<?php echo htmlspecialchars($saleProduct['name']); ?>" 
+                                         class="img-fluid w-100"
+                                         style="height: 250px; object-fit: cover;">
+                                    <div class="sale-overlay position-absolute top-0 start-0 w-100 h-100 d-flex align-items-end p-3">
+                                        <div class="text-light">
+                                            <small class="d-block mb-1"><?php echo htmlspecialchars($saleProduct['category_name']); ?></small>
+                                            <h6 class="mb-1"><?php echo htmlspecialchars($saleProduct['name']); ?></h6>
+                                            <div class="d-flex align-items-center">
+                                                <span class="fw-bold"><?php echo formatPrice($saleProduct['price']); ?></span>
+                                                <?php if ($saleProduct['compare_price'] && $saleProduct['compare_price'] > $saleProduct['price']): ?>
+                                                    <span class="text-light text-decoration-line-through ms-2"><?php echo formatPrice($saleProduct['compare_price']); ?></span>
+                                                    <span class="badge bg-danger ms-2">
+                                                        Save <?php echo $discountPercent; ?>%
+                                                    </span>
+                                                <?php endif; ?>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </a>
+                            </div>
+                        </div>
+                        <?php endforeach; ?>
+                    <?php else: ?>
+                        <div class="col-12 text-center">
+                            <p class="text-light">Sale products coming soon!</p>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Testimonials -->
+<section class="py-5 py-lg-7 bg-light">
+    <div class="container px-0">
+        <div class="text-center mb-5">
+            <h2 class="display-5 fw-bold mb-3">What Our Customers Say</h2>
+            <p class="text-muted lead">Join thousands of satisfied customers</p>
+        </div>
+        
+        <div class="row g-4">
+            <div class="col-lg-4">
+                <div class="testimonial-card bg-white p-4 rounded-3 shadow-sm h-100">
+                    <div class="d-flex align-items-center mb-3">
+                        <div class="rating-stars text-warning me-2">
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                        </div>
+                        <small class="text-muted">2 days ago</small>
+                    </div>
+                    <p class="mb-4">"The quality of linen is exceptional! I've purchased multiple items and each one exceeds expectations. Perfect for our Kenyan climate."</p>
+                    <div class="d-flex align-items-center">
+                        <div class="customer-avatar bg-dark text-light rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 40px; height: 40px;">
+                            <i class="fas fa-user"></i>
+                        </div>
+                        <div>
+                            <h6 class="mb-0 fw-bold">Sarah M.</h6>
+                            <small class="text-muted">Nairobi</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-4">
+                <div class="testimonial-card bg-white p-4 rounded-3 shadow-sm h-100">
+                    <div class="d-flex align-items-center mb-3">
+                        <div class="rating-stars text-warning me-2">
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star-half-alt"></i>
+                        </div>
+                        <small class="text-muted">1 week ago</small>
+                    </div>
+                    <p class="mb-4">"Best linen products in Kenya! The fabric is breathable and durable. The customer service team was very helpful with my order."</p>
+                    <div class="d-flex align-items-center">
+                        <div class="customer-avatar bg-dark text-light rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 40px; height: 40px;">
+                            <i class="fas fa-user"></i>
+                        </div>
+                        <div>
+                            <h6 class="mb-0 fw-bold">James K.</h6>
+                            <small class="text-muted">Mombasa</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-4">
+                <div class="testimonial-card bg-white p-4 rounded-3 shadow-sm h-100">
+                    <div class="d-flex align-items-center mb-3">
+                        <div class="rating-stars text-warning me-2">
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                        </div>
+                        <small class="text-muted">3 days ago</small>
+                    </div>
+                    <p class="mb-4">"Excellent quality and fast delivery. The linen curtains I bought transformed my living room. Will definitely shop here again!"</p>
+                    <div class="d-flex align-items-center">
+                        <div class="customer-avatar bg-dark text-light rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 40px; height: 40px;">
+                            <i class="fas fa-user"></i>
+                        </div>
+                        <div>
+                            <h6 class="mb-0 fw-bold">Grace W.</h6>
+                            <small class="text-muted">Kisumu</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Newsletter Section -->
+<section class="py-5 py-lg-7">
+    <div class="container px-0">
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+                <div class="newsletter-card bg-gradient-primary  text-light p-5 rounded-4 text-center">
+                    <i class="fas fa-envelope-open-text fa-3x mb-4"></i>
+                    <h2 class="display-5 fw-bold mb-3">Stay in the Loop</h2>
+                    <p class="lead mb-4">Subscribe to our newsletter for exclusive offers, style tips, and new arrivals.</p>
+                    <form id="newsletter-form" class="row g-3 justify-content-center">
+                        <div class="col-md-8">
+                            <div class="input-group input-group-lg">
+                                <input type="email" 
+                                       class="form-control" 
+                                       placeholder="Enter your email" 
+                                       required
+                                       style="height: 60px;">
+                                <button class="btn btn-light" type="submit" style="height: 60px;">
+                                    Subscribe
+                                </button>
+                            </div>
+                            <div class="form-text text-light mt-2">We respect your privacy. Unsubscribe at any time.</div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Quick View Modal (Same as products page) -->
+<div class="modal fade" id="quickViewModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-content border-0">
+            <div class="modal-body p-0">
+                <div id="quickViewContent">
+                    <!-- Content loaded via API -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add to Cart Success Toast -->
+<div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="cartSuccessToast" class="toast align-items-center text-white border-0" role="alert">
+        <div class="d-flex">
+            <div class="toast-body">
+                <i class="fas fa-check-circle me-2"></i>
+                <span id="toastMessage">Product added to cart successfully!</span>
+            </div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+        </div>
+    </div>
+</div>
+
+<style>
+
+
+:root {
+    --primary-color: #4a64d6ff;
+    --primary-light: #eef2ff;
+    --secondary-color: #3a0ca3;
+    --accent-color: #f72585;
+    --dark-color: #1a1a2e;
+    --light-color: #f8f9fa;
+    --success-color: #4cc9f0;
+    --warning-color: #f8961e;
+    --danger-color: #f94144;
+}  
+/* Homepage Specific Styles */
+.hero-section {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+}
+
+.carousel-item {
+    transition: transform 0.6s ease-in-out;
+}
+
+.hero-image {
+    object-fit: cover;
+    object-position: center;
+}
+
+.feature-icon {
+    transition: transform 0.3s ease, background-color 0.3s ease;
+}
+
+.feature-icon:hover {
+    transform: scale(1.1);
+    background-color: #495057 !important;
+}
+
+.category-card {
+    transition: transform 0.3s ease;
+}
+
+.category-card:hover {
+    transform: translateY(-10px);
+}
+
+.category-image {
+    transition: transform 0.5s ease;
+}
+
+.category-card:hover .category-image {
+    transform: scale(1.1);
+}
+
+.category-overlay {
+    background: linear-gradient(transparent, rgba(0,0,0,0.7));
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.category-card:hover .category-overlay {
+    opacity: 1;
+}
+
+/* Categories Section Styles */
+.category-image-wrapper {
+    position: relative;
+    overflow: hidden;
+    border-radius: 12px;
+}
+.text-gradient-primary {
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.bg-gradient-primary {
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color)) !important;
+}
+
+/* Responsive adjustments for categories */
+@media (max-width: 992px) {
+    .col-md-4.col-lg-2 {
+        flex: 0 0 auto;
+        width: 33.33333333%;
     }
 }
 
-// Update shipping display
-function updateShippingDisplay(county, shippingCost, message, deliveryDays = 3) {
-    const shipping = parseFloat(shippingCost) || 0;
-    const subtotal = <?php echo $subtotal; ?>;
-    const tax = subtotal * 0.16;
-    const total = subtotal + shipping + tax;
-    
-    // Update county display
-    const currentCountySpan = document.getElementById('currentCounty');
-    if (currentCountySpan) {
-        currentCountySpan.textContent = county;
+@media (max-width: 768px) {
+    .col-md-4.col-lg-2 {
+        flex: 0 0 auto;
+        width: 50%;
+    }
+}
+
+@media (max-width: 576px) {
+    .col-md-4.col-lg-2 {
+        flex: 0 0 auto;
+        width: 50%;
+    }
+}
+
+.hover-lift {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.hover-lift:hover {
+    transform: translateY(-8px);
+    box-shadow: 0 15px 40px rgba(0,0,0,0.1) !important;
+}
+
+.product-overlay {
+    transition: opacity 0.3s ease;
+    background: linear-gradient(transparent, rgba(0,0,0,0.2));
+}
+
+.product-card:hover .product-overlay {
+    opacity: 1 !important;
+}
+
+.product-image {
+    transition: transform 0.5s ease;
+}
+
+.product-card:hover .product-image {
+    transform: scale(1.05);
+}
+
+.text-truncate-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.countdown-box {
+    transition: transform 0.3s ease;
+}
+
+.countdown-box:hover {
+    transform: scale(1.05);
+}
+
+.sale-product-card {
+    transition: transform 0.3s ease;
+}
+
+.sale-product-card:hover {
+    transform: scale(1.02);
+}
+
+.sale-overlay {
+    background: linear-gradient(transparent, rgba(0,0,0,0.8));
+}
+
+.testimonial-card {
+    transition: transform 0.3s ease;
+}
+
+.testimonial-card:hover {
+    transform: translateY(-5px);
+}
+
+.rating-stars {
+    font-size: 0.9rem;
+}
+
+.customer-avatar {
+    font-size: 1rem;
+}
+
+.newsletter-card {
+    background: linear-gradient(135deg, #343a40 0%, #212529 100%);
+}
+
+/* Product Carousel Styles */
+.carousel-control-prev,
+.carousel-control-next {
+    width: 50px;
+    height: 50px;
+    top: 50%;
+    transform: translateY(-50%);
+    opacity: 0.8;
+}
+
+.carousel-control-prev:hover,
+.carousel-control-next:hover {
+    opacity: 1;
+}
+
+.carousel-control-prev {
+    left: -25px;
+}
+
+.carousel-control-next {
+    right: -25px;
+}
+
+/* Responsive Adjustments */
+@media (max-width: 768px) {
+    .hero-content {
+        padding: 2rem !important;
     }
     
-    // Update shipping cost display
-    const shippingCostSpan = document.getElementById('currentShippingCost');
-    if (shippingCostSpan) {
-        shippingCostSpan.innerHTML = shipping === 0 
-            ? '<span class="text-success">FREE</span>'
-            : 'Ksh ' + shipping.toFixed(2);
+    .display-3 {
+        font-size: 2rem;
     }
     
-    // Update shipping message
-    const shippingMessageSpan = document.getElementById('currentShippingMessage');
-    if (shippingMessageSpan) {
-        const deliveryInfo = deliveryDays ? ` (${deliveryDays} business days)` : '';
-        shippingMessageSpan.textContent = message + deliveryInfo;
+    .display-4 {
+        font-size: 1.75rem;
     }
     
-    // Update order summary
-    const shippingSummary = document.getElementById('shippingSummary');
-    const totalSummary = document.getElementById('totalSummary');
-    const mpesaAmount = document.getElementById('mpesaAmount');
-    
-    if (shippingSummary) {
-        shippingSummary.innerHTML = shipping === 0 
-            ? '<span class="text-success">FREE</span><small class="d-block text-muted">' + message + '</small>'
-            : 'Ksh ' + shipping.toFixed(2) + '<small class="d-block text-muted">' + message + '</small>';
+    .display-5 {
+        font-size: 1.5rem;
     }
     
-    if (totalSummary) {
-        totalSummary.textContent = 'Ksh ' + total.toFixed(2);
-        totalSummary.classList.add('price-update');
+    .hero-image {
+        height: 50vh !important;
+    }
+    
+    .category-image-wrapper {
+        height: 150px !important;
+    }
+    
+    .product-card .product-image {
+        height: 200px !important;
+    }
+    
+    .carousel-control-prev,
+    .carousel-control-next {
+        width: 40px;
+        height: 40px;
+    }
+    
+    .carousel-control-prev {
+        left: -15px;
+    }
+    
+    .carousel-control-next {
+        right: -15px;
+    }
+}
+
+@media (max-width: 576px) {
+    .row-cols-2 > * {
+        flex: 0 0 auto;
+        width: 50%;
+    }
+    
+    .carousel-control-prev,
+    .carousel-control-next {
+        width: 35px;
+        height: 35px;
+    }
+    
+    .carousel-control-prev {
+        left: -10px;
+    }
+    
+    .carousel-control-next {
+        right: -10px;
+    }
+}
+</style>
+
+<script>
+// DOM Ready
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize sale countdown
+    initializeSaleCountdown();
+    
+    // Setup event listeners
+    setupHomepageEventListeners();
+    
+    // Initialize carousels
+    const heroCarousel = new bootstrap.Carousel(document.getElementById('heroCarousel'), {
+        interval: 5000,
+        ride: 'carousel'
+    });
+    
+    // Initialize product carousels
+    initializeProductCarousels();
+});
+
+// Initialize Product Carousels
+function initializeProductCarousels() {
+    const carousels = [
+        'newArrivalsCarousel',
+        'bestSellersCarousel', 
+        'saleProductsCarousel'
+    ];
+    
+    carousels.forEach(carouselId => {
+        const carouselElement = document.getElementById(carouselId);
+        if (carouselElement) {
+            new bootstrap.Carousel(carouselElement, {
+                interval: 6000,
+                wrap: true,
+                touch: true
+            });
+        }
+    });
+}
+
+// Sale Countdown Timer
+function initializeSaleCountdown() {
+    function updateSaleCountdown() {
+        // Set sale end date (7 days from now)
+        const countdownDate = new Date();
+        countdownDate.setDate(countdownDate.getDate() + 7);
+        
+        const now = new Date().getTime();
+        const distance = countdownDate - now;
+        
+        const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+        const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+        
+        if (document.getElementById('saleDays')) {
+            document.getElementById('saleDays').textContent = days.toString().padStart(2, '0');
+            document.getElementById('saleHours').textContent = hours.toString().padStart(2, '0');
+            document.getElementById('saleMinutes').textContent = minutes.toString().padStart(2, '0');
+            document.getElementById('saleSeconds').textContent = seconds.toString().padStart(2, '0');
+        }
+        
+        // Update hero countdown if exists
+        if (document.getElementById('heroCountdown')) {
+            document.getElementById('heroCountdown').innerHTML = `
+                <div class="countdown-item">
+                    <div class="countdown-value">${days.toString().padStart(2, '0')}</div>
+                    <div class="countdown-label">Days</div>
+                </div>
+                <div class="countdown-separator">:</div>
+                <div class="countdown-item">
+                    <div class="countdown-value">${hours.toString().padStart(2, '0')}</div>
+                    <div class="countdown-label">Hours</div>
+                </div>
+                <div class="countdown-separator">:</div>
+                <div class="countdown-item">
+                    <div class="countdown-value">${minutes.toString().padStart(2, '0')}</div>
+                    <div class="countdown-label">Mins</div>
+                </div>
+                <div class="countdown-separator">:</div>
+                <div class="countdown-item">
+                    <div class="countdown-value">${seconds.toString().padStart(2, '0')}</div>
+                    <div class="countdown-label">Secs</div>
+                </div>
+            `;
+        }
+        
+        if (distance < 0) {
+            clearInterval(countdownInterval);
+            document.querySelectorAll('.countdown-box').forEach(box => {
+                box.innerHTML = '<div class="text-center">Sale<br>Ended</div>';
+            });
+        }
+    }
+    
+    // Update immediately and every second
+    updateSaleCountdown();
+    const countdownInterval = setInterval(updateSaleCountdown, 1000);
+}
+
+// Setup Event Listeners
+function setupHomepageEventListeners() {
+    // Add to cart buttons (using same function as products page)
+    document.querySelectorAll('.add-to-cart-btn').forEach(button => {
+        button.addEventListener('click', function() {
+            const productId = this.dataset.productId;
+            const productName = this.dataset.productName;
+            addToCart(productId, 1, productName);
+        });
+    });
+    
+    // Quick view buttons
+    document.querySelectorAll('.quick-view-btn').forEach(button => {
+        button.addEventListener('click', function() {
+            const productId = this.dataset.productId;
+            loadQuickView(productId);
+        });
+    });
+    
+    // Add to wishlist buttons
+    document.querySelectorAll('.add-to-wishlist').forEach(button => {
+        button.addEventListener('click', function() {
+            const productId = this.dataset.productId;
+            addToWishlist(productId);
+        });
+    });
+    
+    // Newsletter form
+    document.getElementById('newsletter-form')?.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const email = this.querySelector('input[type="email"]').value;
+        
+        // Simple validation
+        if (!email || !email.includes('@')) {
+            showToast('Please enter a valid email address', 'error');
+            return;
+        }
+        
+        // Show loading
+        const submitBtn = this.querySelector('button[type="submit"]');
+        const originalText = submitBtn.innerHTML;
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Subscribing...';
+        submitBtn.disabled = true;
+        
+        // Simulate API call (replace with actual API)
         setTimeout(() => {
-            totalSummary.classList.remove('price-update');
-        }, 500);
-    }
-    
-    if (mpesaAmount) {
-        mpesaAmount.textContent = total.toFixed(2);
-    }
+            showToast('Thank you for subscribing to our newsletter!', 'success');
+            this.reset();
+            submitBtn.innerHTML = originalText;
+            submitBtn.disabled = false;
+        }, 1500);
+    });
 }
 
-// Validate "Other" county on form submission
-document.getElementById('checkoutForm')?.addEventListener('submit', function(e) {
-    const countySelect = document.getElementById('countySelect');
-    const otherCountyDiv = document.getElementById('otherCountyDiv');
-    const otherCountyInput = document.getElementById('otherCountyInput');
-    
-    if (countySelect.value === 'Other' && otherCountyDiv.style.display === 'block') {
-        if (!otherCountyInput.value.trim()) {
-            e.preventDefault();
-            alert('Please specify your county');
-            otherCountyInput.focus();
-            return false;
-        }
-        
-        // Set the actual county value
-        countySelect.value = otherCountyInput.value.trim();
-    }
-    
-    return true;
-});
-
-// Update shipping based on county
-async function updateShippingByCounty(county) {
-    if (!county || county === '') return;
-    
-    const subtotal = <?php echo $subtotal; ?>;
-    
+// Add to Cart Function (same as products page)
+async function addToCart(productId, quantity, productName = '') {
     try {
-        const response = await fetch('<?php echo SITE_URL; ?>ajax/calculate-shipping.php', {
+        const response = await fetch('<?php echo SITE_URL; ?>ajax/add-to-cart.php', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                county: county,
-                subtotal: subtotal
+                product_id: productId,
+                quantity: quantity
             })
         });
         
         const data = await response.json();
         
         if (data.success) {
-            // Update shipping cost
-            const shipping = parseFloat(data.cost) || 0;
-            const tax = subtotal * 0.16;
-            const total = subtotal + shipping + tax;
+            // Update cart count in header
+            updateCartCount(data.cart_count || data.cart?.count || 0);
             
-            // Update display
-            const shippingSummary = document.getElementById('shippingSummary');
-            const totalSummary = document.getElementById('totalSummary');
-            const mpesaAmount = document.getElementById('mpesaAmount');
-            
-            if (shippingSummary) {
-                shippingSummary.innerHTML = shipping === 0 
-                    ? '<span class="text-success">FREE</span>'
-                    : 'Ksh ' + shipping.toFixed(2);
-            }
-            
-            if (totalSummary) {
-                totalSummary.textContent = 'Ksh ' + total.toFixed(2);
-                totalSummary.classList.add('price-update');
-                setTimeout(() => {
-                    totalSummary.classList.remove('price-update');
-                }, 500);
-            }
-            
-            if (mpesaAmount) {
-                mpesaAmount.textContent = total.toFixed(2);
-            }
-            
-            // Update shipping message
-            const shippingMessage = data.message || 'Standard shipping';
-            const shippingInfoDiv = document.querySelector('.alert.alert-info');
-            if (shippingInfoDiv) {
-                shippingInfoDiv.innerHTML = `
-                    <p class="mb-2"><strong>Shipping to:</strong> ${county}</p>
-                    <p class="mb-0"><strong>Cost:</strong> 
-                        ${shipping > 0 ? 'Ksh ' + shipping.toFixed(2) : '<span class="text-success">FREE</span>'}
-                        <br>
-                        <small class="text-muted">${shippingMessage}</small>
-                    </p>
-                `;
-            }
+            // Show success toast
+            const message = productName 
+                ? `<strong>${productName}</strong> added to cart!` 
+                : 'Product added to cart successfully!';
+            showToast(message);
+        } else {
+            showToast(data.message || 'Failed to add product to cart', 'error');
         }
     } catch (error) {
-        console.error('Update shipping error:', error);
+        console.error('Add to cart error:', error);
+        showToast('Something went wrong. Please try again.', 'error');
     }
 }
-}
-</script>
 
-<?php
-require_once __DIR__ . '/../includes/footer.php';
-?>
+// Add to Wishlist
+async function addToWishlist(productId) {
+    try {
+        const response = await fetch('<?php echo SITE_URL; ?>ajax/add-to-wishlist.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                product_id: productId
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast('Product added to wishlist!');
+        } else {
+            showToast(data.message || 'Failed to add to wishlist', 'error');
+        }
+    } catch (error) {
+        console.error('Wishlist error:', error);
+        showToast('Something went wrong. Please try again.', 'error');
+    }
+}
+
+
+function updateCartCount(count) {
+    const cartCountElements = document.querySelectorAll('.cart-count');
+    cartCountElements.forEach(element => {
+        element.textContent = count;
+        element.classList.toggle('d-none', count === 0);
+    });
+}
+
+// Show Toast Notification
+function showToast(message, type = 'success') {
+    const toastElement = document.getElementById('cartSuccessToast');
+    const toastMessage = document.getElementById('toastMessage');
+    
+    if (!toastElement || !toastMessage) return;
+    
+    // Parse HTML if message contains HTML
+    if (typeof message === 'string' && message.includes('<')) {
+        toastMessage.innerHTML = message;
+    } else {
+        toastMessage.textContent = message;
+    }
+    
+    // Remove all previous classes
+    toastElement.className = 'toast align-items-center text-white border-0';
+    
+    // Add appropriate class
+    if (type === 'success') {
+        toastElement.classList.add('bg-success');
+    } else if (type === 'error') {
+        toastElement.classList.add('bg-danger');
+    } else {
+        toastElement.classList.add('bg-primary');
+    }
+    
+    const toast = new bootstrap.Toast(toastElement, { delay: 3000 });
+    toast.show();
+}
+
+// Hover effects for product cards
+document.querySelectorAll('.product-card').forEach(card => {
+    card.addEventListener('mouseenter', function() {
+        const overlay = this.querySelector('.product-overlay');
+        if (overlay) overlay.style.opacity = '1';
+    });
+    
+    card.addEventListener('mouseleave', function() {
+        const overlay = this.querySelector('.product-overlay');
+        if (overlay) overlay.style.opacity = '0';
+    });
+});
+</script>

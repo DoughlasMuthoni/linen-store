@@ -27,17 +27,17 @@ ini_set('display_errors', 1);
 
 
 // Email Configuration
-define('SITE_EMAIL', 'orders@yourdomain.com');
+define('SITE_EMAIL', 'githuiddoughlas8@gmail.com');
 // define('SITE_NAME', 'Linen Closet');
-define('ADMIN_EMAIL', 'admin@yourdomain.com');
-define('SUPPORT_EMAIL', 'support@yourdomain.com');
+define('ADMIN_EMAIL', 'githuiddoughlas8@gmail.com');
+define('SUPPORT_EMAIL', 'githuiddoughlas8@gmail.com');
 
-// SMTP Configuration (Optional - for better email delivery)
-define('SMTP_HOST', 'smtp.yourdomain.com');
+// SMTP Configuration
+define('SMTP_HOST', 'smtp.gmail.com');
 define('SMTP_PORT', 587);
-define('SMTP_USERNAME', 'noreply@yourdomain.com');
-define('SMTP_PASSWORD', 'yourpassword');
-define('SMTP_SECURE', 'tls'); // 'tls' or 'ssl'
+define('SMTP_USERNAME', 'githuiddoughlas8@gmail.com');  
+define('SMTP_PASSWORD', 'lcwuukirsttwxbce');            
+define('SMTP_SECURE', 'tls');
 
 // Order Email Settings
 define('SEND_ORDER_CONFIRMATION', true);

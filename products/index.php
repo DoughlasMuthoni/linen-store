@@ -896,40 +896,43 @@ function renderStars($rating) {
                                                 </div>
                                                 
                                                 <!-- Price & Actions -->
-                                                <div class="mt-auto">
-                                                    <div class="d-flex justify-content-between align-items-center">
-                                                        <div>
-                                                            <div class="d-flex align-items-center mb-1">
-                                                                <h3 class="text-primary fw-bold mb-0"><?php echo $priceDisplay; ?></h3>
-                                                                <?php if (isset($product['compare_price']) && $product['compare_price'] > $product['price']): ?>
-                                                                    <small class="text-muted text-decoration-line-through ms-3 fs-6">
-                                                                        <?php echo formatPrice($product['compare_price']); ?>
-                                                                    </small>
-                                                                <?php endif; ?>
-                                                            </div>
-                                                            <?php if ($hasVariants): ?>
-                                                                <small class="text-muted d-block">Multiple options available</small>
+                                                <!-- Price & Actions -->
+                                            <div class="mt-3">
+                                                <div class="d-flex align-items-center justify-content-between">
+                                                    <!-- Price -->
+                                                    <div>
+                                                        <div class="d-flex align-items-center mb-1">
+                                                            <h4 class="text-primary fw-bold mb-0"><?php echo $priceDisplay; ?></h4>
+                                                            <?php if (isset($product['compare_price']) && $product['compare_price'] > $product['price']): ?>
+                                                                <small class="text-muted text-decoration-line-through ms-2 fs-6">
+                                                                    <?php echo formatPrice($product['compare_price']); ?>
+                                                                </small>
                                                             <?php endif; ?>
                                                         </div>
-                                                        
-                                                        <div class="d-flex gap-2">
-                                                        
-                                                            <button type="button" 
-                                                                    class="btn btn-outline-primary btn-lg rounded-pill add-to-wishlist"
-                                                                    data-product-id="<?php echo $product['id']; ?>"
-                                                                    title="Add to Wishlist">
-                                                                <i class="far fa-heart"></i>
-                                                            </button>
-                                                            <button type="button" 
-                                                                    class="btn btn-primary btn-lg rounded-pill px-4 add-to-cart-btn"
-                                                                    data-product-id="<?php echo $product['id']; ?>"
-                                                                    <?php echo $stockStatus['text'] === 'Out of Stock' ? 'disabled' : ''; ?>>
-                                                                <i class="fas fa-shopping-cart me-2"></i>
-                                                                Add to Cart
-                                                            </button>
-                                                        </div>
+                                                        <?php if ($hasVariants): ?>
+                                                            <small class="text-muted d-block">Multiple options</small>
+                                                        <?php endif; ?>
+                                                    </div>
+                                                    
+                                                    <!-- Actions -->
+                                                    <div class="d-flex gap-2">
+                                                        <button type="button" 
+                                                                class="btn btn-outline-primary rounded-pill add-to-wishlist py-2 px-3"
+                                                                data-product-id="<?php echo $product['id']; ?>"
+                                                                title="Add to Wishlist">
+                                                            <i class="far fa-heart"></i>
+                                                        </button>
+                                                        <button type="button" 
+                                                                class="btn btn-primary rounded-pill px-4 py-2 add-to-cart-btn"
+                                                                data-product-id="<?php echo $product['id']; ?>"
+                                                                data-product-name="<?php echo htmlspecialchars($product['name']); ?>"
+                                                                <?php echo $stockStatus['text'] === 'Out of Stock' ? 'disabled' : ''; ?>>
+                                                            <i class="fas fa-shopping-cart me-2"></i>
+                                                            Add to Cart
+                                                        </button>
                                                     </div>
                                                 </div>
+                                            </div>
                                             </div>
                                         </div>
                                     </div>
@@ -1028,38 +1031,36 @@ function renderStars($rating) {
                                             </div>
                                             
                                             <!-- Price -->
-                                            <div class="mt-auto">
-                                                <div class="d-flex justify-content-between align-items-center mb-3">
-                                                    <div>
-                                                        <div class="d-flex align-items-center">
-                                                            <h5 class="text-primary fw-bold mb-0 <?php echo $filters['view'] === 'compact' ? 'fs-5' : 'fs-4'; ?>">
-                                                                <?php echo $priceDisplay; ?>
-                                                            </h5>
-                                                            <?php if (isset($product['compare_price']) && $product['compare_price'] > $product['price']): ?>
-                                                                <small class="text-muted text-decoration-line-through ms-2 <?php echo $filters['view'] === 'compact' ? 'fs-7' : 'fs-6'; ?>">
-                                                                    <?php echo formatPrice($product['compare_price']); ?>
-                                                                </small>
-                                                            <?php endif; ?>
-                                                        </div>
-                                                        <?php if ($hasVariants): ?>
-                                                            <small class="text-muted">From <?php echo formatPrice($product['variant_min_price']); ?></small>
-                                                        <?php endif; ?>
-                                                    </div>
-                                                </div>
-                                                
-                                                <!-- Add to Cart Button -->
-                                                <div class="d-grid">
-                                                  <button type="button" 
-                                                        class="btn btn-primary w-100 add-to-cart-btn rounded-pill"
-                                                        data-product-id="<?php echo $product['id']; ?>"
-                                                        <?php echo $stockStatus['text'] === 'Out of Stock' ? 'disabled' : ''; ?>>
-                                                    <i class="fas fa-shopping-cart me-2"></i>
-                                                    <?php echo $stockStatus['text'] === 'Out of Stock' ? 'Out of Stock' : 'Add to Cart'; ?>
-                                                </button>
-                                                </div>
-                                                
-                                            
-                                            </div>
+                                            <!-- Price and Add to Cart -->
+<div class="mt-2">
+    <!-- Price -->
+    <div class="d-flex align-items-center mb-2">
+        <div class="text-primary fw-bold mb-0 <?php echo $filters['view'] === 'compact' ? 'fs-6' : 'fs-5'; ?>">
+        <?php echo $priceDisplay; ?>
+    </div>
+        <?php if (isset($product['compare_price']) && $product['compare_price'] > $product['price']): ?>
+            <small class="text-muted text-decoration-line-through ms-2 <?php echo $filters['view'] === 'compact' ? 'fs-7' : 'fs-6'; ?>">
+                <?php echo formatPrice($product['compare_price']); ?>
+            </small>
+        <?php endif; ?>
+    </div>
+    
+    <?php if ($hasVariants): ?>
+        <small class="text-muted d-block mb-2">From <?php echo formatPrice($product['variant_min_price']); ?></small>
+    <?php endif; ?>
+    
+    <!-- Add to Cart Button -->
+    <div class="d-grid">
+        <button type="button" 
+                class="btn btn-primary w-100 add-to-cart-btn rounded-pill py-2"
+                data-product-id="<?php echo $product['id']; ?>"
+                data-product-name="<?php echo htmlspecialchars($product['name']); ?>"
+                <?php echo $stockStatus['text'] === 'Out of Stock' ? 'disabled' : ''; ?>>
+            <i class="fas fa-shopping-cart me-2"></i>
+            <?php echo $stockStatus['text'] === 'Out of Stock' ? 'Out of Stock' : 'Add to Cart'; ?>
+        </button>
+    </div>
+</div>
                                         </div>
                                     </div>
                                 </div>
@@ -1222,6 +1223,7 @@ function renderStars($rating) {
 </div>
 
 <!-- Mobile Filters Offcanvas -->
+
 <div class="offcanvas offcanvas-start" tabindex="-1" id="mobileFiltersOffcanvas">
     <div class="offcanvas-header border-bottom bg-gradient-primary text-white">
         <h5 class="offcanvas-title fw-bold">
@@ -1229,9 +1231,54 @@ function renderStars($rating) {
         </h5>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas"></button>
     </div>
-    <div class="offcanvas-body">
-        <div id="mobile-filters-content">
-            <!-- Content loaded via JavaScript -->
+    <div class="offcanvas-body p-0">
+        <div id="mobile-filters-content" class="p-3">
+            <!-- Categories Filter -->
+            <div class="mb-4">
+                <h6 class="fw-bold mb-3 text-primary">Categories</h6>
+                <div class="list-group">
+                    <a href="?" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                        All Products
+                        <span class="badge bg-primary rounded-pill"><?php echo $totalProducts; ?></span>
+                    </a>
+                    <?php foreach ($filterCategories as $cat): ?>
+                    <a href="?category=<?php echo $cat['slug']; ?>" 
+                       class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                        <?php echo htmlspecialchars($cat['name']); ?>
+                        <span class="badge bg-primary rounded-pill"><?php echo $cat['product_count']; ?></span>
+                    </a>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+            
+            <!-- Sort Options -->
+            <div class="mb-4">
+                <h6 class="fw-bold mb-3 text-primary">Sort By</h6>
+                <div class="list-group">
+                    <?php foreach ($sortOptions as $value => $label): ?>
+                    <button class="list-group-item list-group-item-action sort-option <?php echo $filters['sort'] === $value ? 'active' : ''; ?>" 
+                            data-sort="<?php echo $value; ?>">
+                        <?php echo $label; ?>
+                        <?php if ($filters['sort'] === $value): ?>
+                        <i class="fas fa-check float-end text-primary"></i>
+                        <?php endif; ?>
+                    </button>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+            
+            <!-- Price Range -->
+            <div class="mb-4">
+                <h6 class="fw-bold mb-3 text-primary">Price Range</h6>
+                <div class="px-2">
+                    <input type="range" class="form-range" min="0" max="10000" step="100" 
+                           id="mobilePriceRange" value="<?php echo $filters['max_price'] ?: 5000; ?>">
+                    <div class="d-flex justify-content-between mt-2">
+                        <small class="text-muted">Ksh 0</small>
+                        <small class="text-muted" id="mobileMaxPrice">Ksh <?php echo number_format($filters['max_price'] ?: 5000); ?></small>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
     <div class="offcanvas-footer border-top p-3 bg-light">
@@ -1239,7 +1286,7 @@ function renderStars($rating) {
             <button type="button" class="btn btn-primary btn-lg py-3" id="apply-mobile-filters">
                 <i class="fas fa-check me-2"></i>Apply Filters
             </button>
-            <button type="button" class="btn btn-outline-primary btn-lg py-3" id="clear-mobile-filters">
+            <button type="button" class="btn btn-outline-primary btn-lg py-3" onclick="window.location.href='?'">
                 <i class="fas fa-times me-2"></i>Clear All
             </button>
         </div>
@@ -1837,6 +1884,138 @@ function renderStars($rating) {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--secondary-color);
 }
+/* Mobile Filter Improvements */
+.mobile-filter-card {
+    max-height: 70vh;
+    overflow-y: auto;
+    padding: 1rem;
+}
+
+#mobile-filters-content .list-group-item {
+    border: none;
+    padding: 0.75rem 1rem;
+}
+
+#mobile-filters-content .list-group-item.active {
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    color: white;
+    border: none;
+}
+
+/* Price Section Spacing Fixes */
+#products-container .mt-auto {
+    margin-top: auto;
+}
+
+/* Compact Grid View */
+.row-cols-xl-5 .product-card .card-body {
+    padding: 1rem !important;
+}
+
+.row-cols-xl-5 .product-title {
+    font-size: 0.9rem !important;
+    margin-bottom: 0.5rem !important;
+}
+
+.row-cols-xl-5 .price h5 {
+    font-size: 1rem !important;
+}
+
+.row-cols-xl-5 .add-to-cart-btn {
+    padding: 0.4rem 0.5rem !important;
+    font-size: 0.75rem !important;
+}
+
+/* Better spacing for mobile product cards */
+@media (max-width: 768px) {
+    .product-card .card-body {
+        padding: 0.75rem !important;
+    }
+    
+    .product-title {
+        font-size: 0.85rem !important;
+        margin-bottom: 0.3rem !important;
+    }
+    
+    .price h5,
+    .price h4,
+    .price h3 {
+        font-size: 1rem !important;
+        margin-bottom: 0.2rem !important;
+    }
+    
+    .price small {
+        font-size: 0.75rem !important;
+    }
+    
+    .stock-status {
+        margin-bottom: 0.5rem !important;
+    }
+    
+    .add-to-cart-btn {
+        padding: 0.4rem 0.6rem !important;
+        font-size: 0.8rem !important;
+    }
+    
+    /* List view mobile adjustments */
+    .products-list-view .product-card .row {
+        flex-direction: column;
+    }
+    
+    .products-list-view .col-md-4 {
+        width: 100%;
+        margin-bottom: 1rem;
+    }
+    
+    .products-list-view .col-md-8 {
+        width: 100%;
+    }
+}
+
+/* Remove excessive margins */
+.product-details .mb-3,
+.product-details .mb-4 {
+    margin-bottom: 0.75rem !important;
+}
+
+/* For compact view */
+#products-container .row-cols-5 .product-details .mb-3,
+#products-container .row-cols-5 .product-details .mb-4 {
+    margin-bottom: 0.5rem !important;
+}
+
+/* Fix for the empty space in product cards */
+.product-card .flex-grow-1 {
+    flex: 1;
+    min-height: auto;
+}
+
+/* Ensure price and button are close together */
+.product-card .mt-auto:not(.d-flex) {
+    margin-top: 0.5rem !important;
+}
+
+/* Better button sizing */
+.add-to-cart-btn {
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Mobile filter offcanvas improvements */
+#mobileFiltersOffcanvas .offcanvas-body {
+    padding: 0;
+}
+
+#mobile-filters-content {
+    padding: 1rem;
+}
+
+/* Make sure mobile filters are visible */
+#mobile-filters-content .filter-card {
+    display: block !important;
+}
 </style>
 
 <!-- Include JavaScript Libraries -->
@@ -2364,15 +2543,91 @@ function removeFilter(key, value) {
 }
 
 // Load Mobile Filters
+// Load Mobile Filters
 function loadMobileFilters() {
     const mobileFiltersContent = document.getElementById('mobile-filters-content');
     if (!mobileFiltersContent) return;
     
-    // Clone desktop filters for mobile
-    const desktopFilters = document.querySelector('.sticky-sidebar').cloneNode(true);
-    mobileFiltersContent.appendChild(desktopFilters);
+    // Get all the filter sections from the desktop sidebar
+    const desktopFilters = document.querySelector('.filter-card');
+    if (!desktopFilters) {
+        // Create mobile filters manually if desktop filters don't exist
+        createMobileFilters(mobileFiltersContent);
+        return;
+    }
+    
+    // Clone the desktop filters for mobile
+    const clonedFilters = desktopFilters.cloneNode(true);
+    
+    // Remove any desktop-specific classes and make it mobile-friendly
+    clonedFilters.classList.remove('d-none', 'd-lg-block');
+    clonedFilters.classList.add('mobile-filter-card');
+    
+    // Clear existing content and add the cloned filters
+    mobileFiltersContent.innerHTML = '';
+    mobileFiltersContent.appendChild(clonedFilters);
+    
+    // Reinitialize any mobile-specific functionality
+    initializeMobileFilterComponents();
 }
 
+// Create mobile filters if desktop filters aren't available
+function createMobileFilters(container) {
+    container.innerHTML = `
+        <div class="mobile-filter-card">
+            <!-- Category Filter -->
+            <div class="mb-4">
+                <h6 class="fw-bold mb-3 text-primary">Categories</h6>
+                <div class="list-group">
+                    <a href="?" class="list-group-item list-group-item-action">All Products</a>
+                    <a href="?sort=newest" class="list-group-item list-group-item-action">New Arrivals</a>
+                    <a href="?filter=on_sale" class="list-group-item list-group-item-action">On Sale</a>
+                </div>
+            </div>
+            
+            <!-- Price Range -->
+            <div class="mb-4">
+                <h6 class="fw-bold mb-3 text-primary">Price Range</h6>
+                <input type="range" class="form-range" min="0" max="10000" step="100">
+                <div class="d-flex justify-content-between">
+                    <small>Ksh 0</small>
+                    <small>Ksh 10,000</small>
+                </div>
+            </div>
+            
+            <!-- Sort Options -->
+            <div class="mb-4">
+                <h6 class="fw-bold mb-3 text-primary">Sort By</h6>
+                <div class="list-group">
+                    <button class="list-group-item list-group-item-action sort-option" data-sort="newest">Newest</button>
+                    <button class="list-group-item list-group-item-action sort-option" data-sort="price_low">Price: Low to High</button>
+                    <button class="list-group-item list-group-item-action sort-option" data-sort="price_high">Price: High to Low</button>
+                    <button class="list-group-item list-group-item-action sort-option" data-sort="popular">Most Popular</button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function initializeMobileFilterComponents() {
+    // Reinitialize mobile filter buttons
+    document.querySelectorAll('#mobile-filters-content .sort-option').forEach(option => {
+        option.addEventListener('click', function(e) {
+            e.preventDefault();
+            const sort = this.dataset.sort;
+            updateURLParameter('sort', sort);
+        });
+    });
+    
+    // Reinitialize price range slider for mobile
+    const priceSlider = document.querySelector('#mobile-filters-content input[type="range"]');
+    if (priceSlider) {
+        priceSlider.addEventListener('change', function() {
+            const price = this.value;
+            updateURLParameter('max_price', price);
+        });
+    }
+}
 // Toggle Wishlist - SIMPLE VERSION
 // Toggle Wishlist - UPDATED WITH LOGIN HANDLING
 async function toggleWishlist(productId, buttonElement) {
@@ -2779,6 +3034,52 @@ if ('IntersectionObserver' in window) {
         imageObserver.observe(img);
     });
 }
+// Mobile price range
+const mobilePriceRange = document.getElementById('mobilePriceRange');
+if (mobilePriceRange) {
+    mobilePriceRange.addEventListener('input', function() {
+        document.getElementById('mobileMaxPrice').textContent = 
+            'Ksh ' + parseInt(this.value).toLocaleString();
+    });
+}
+
+// Mobile sort options
+document.querySelectorAll('#mobile-filters-content .sort-option').forEach(option => {
+    option.addEventListener('click', function() {
+        document.querySelectorAll('#mobile-filters-content .sort-option').forEach(opt => {
+            opt.classList.remove('active');
+        });
+        this.classList.add('active');
+        updateURLParameter('sort', this.dataset.sort);
+    });
+});
+
+// Apply mobile filters
+document.getElementById('apply-mobile-filters')?.addEventListener('click', function() {
+    const maxPrice = document.getElementById('mobilePriceRange').value;
+    const params = new URLSearchParams(window.location.search);
+    
+    if (maxPrice && maxPrice < 10000) {
+        params.set('max_price', maxPrice);
+    } else {
+        params.delete('max_price');
+    }
+    
+    // Get active sort
+    const activeSort = document.querySelector('#mobile-filters-content .sort-option.active');
+    if (activeSort) {
+        params.set('sort', activeSort.dataset.sort);
+    }
+    
+    params.set('page', 1);
+    
+    const offcanvas = bootstrap.Offcanvas.getInstance(document.getElementById('mobileFiltersOffcanvas'));
+    offcanvas.hide();
+    
+    setTimeout(() => {
+        window.location.href = window.location.pathname + '?' + params.toString();
+    }, 300);
+});
 </script>
 
 <?php

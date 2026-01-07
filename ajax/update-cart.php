@@ -1,5 +1,5 @@
 <?php
-// /linen-closet/ajax/update-cart.php - UPDATED FOR VARIANTS
+// /linen-closet/ajax/update-cart.php - UPDATED FOR TAX SETTINGS
 
 // Disable error display in production, log instead
 ini_set('display_errors', 0);
@@ -59,6 +59,22 @@ try {
     
     if (!$db) {
         throw new Exception('Database connection failed');
+    }
+    
+    // Get tax settings
+    function getTaxSettingsFromDB($db) {
+        $stmt = $db->prepare("SELECT setting_key, setting_value FROM settings WHERE setting_key IN ('tax_enabled', 'tax_rate')");
+        $stmt->execute();
+        
+        $settings = [];
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $settings[$row['setting_key']] = $row['setting_value'];
+        }
+        
+        return [
+            'enabled' => $settings['tax_enabled'] ?? '1',
+            'rate' => floatval($settings['tax_rate'] ?? 16)
+        ];
     }
     
     // If using cart_key (new system)
@@ -170,7 +186,8 @@ try {
     echo json_encode([
         'success' => true,
         'message' => 'Cart updated successfully',
-        'cart' => $cartSummary
+        'cart' => $cartSummary,
+        'tax_settings' => getTaxSettingsFromDB($db)
     ]);
     
 } catch (PDOException $e) {
@@ -295,8 +312,17 @@ function getCartSummary($cart, $db) {
         }
     }
     
-    $shipping = ($subtotal >= 5000) ? 0 : 300;
-    $tax = $subtotal * 0.16;
+    // Get tax settings
+    $taxSettings = getTaxSettingsFromDB($db);
+    $shipping = ($subtotal >= 5000) ? 0 : 300; // You might want to get this from settings too
+    
+    // Calculate tax based on settings
+    if ($taxSettings['enabled'] == '1') {
+        $tax = $subtotal * ($taxSettings['rate'] / 100);
+    } else {
+        $tax = 0;
+    }
+    
     $total = $subtotal + $shipping + $tax;
     
     return [
@@ -305,7 +331,9 @@ function getCartSummary($cart, $db) {
         'shipping' => round($shipping, 2),
         'tax' => round($tax, 2),
         'total' => round($total, 2),
-        'items' => $items
+        'items' => $items,
+        'tax_enabled' => $taxSettings['enabled'],
+        'tax_rate' => $taxSettings['rate']
     ];
 }
 

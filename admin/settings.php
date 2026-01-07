@@ -76,6 +76,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             updateSetting($db, 'smtp_password', $_POST['smtp_password'] ?? '');
             updateSetting($db, 'smtp_encryption', $_POST['smtp_encryption'] ?? 'tls');
             break;
+        case 'tax':
+            updateSetting($db, 'tax_enabled', $_POST['tax_enabled'] ?? '0');
+            updateSetting($db, 'tax_rate', $_POST['tax_rate'] ?? '16');
+            updateSetting($db, 'tax_display', $_POST['tax_display'] ?? 'inclusive');
+            updateSetting($db, 'tax_number', $_POST['tax_number'] ?? '');
+            break;
     }
     
     // Show success message
@@ -564,27 +570,87 @@ Kisumu CBD, Milimani, Kondele"></textarea>
                         <form method="POST">
                             <input type="hidden" name="section" value="tax">
                             <div class="card-body">
-                                <div class="row g-3">
-                                    <div class="col-md-6">
-                                        <label class="form-label">Tax Rate (%)</label>
-                                        <input type="number" name="tax_rate" 
-                                               value="' . htmlspecialchars($settings['tax_rate'] ?? '16') . '" 
-                                               class="form-control" step="0.01" min="0" max="100">
-                                        <small class="text-muted">VAT rate (16% for Kenya)</small>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <label class="form-label">Tax Display</label>
-                                        <select name="tax_display" class="form-select">
-                                            <option value="inclusive" ' . (($settings['tax_display'] ?? 'inclusive') == 'inclusive' ? 'selected' : '') . '>Prices inclusive of tax</option>
-                                            <option value="exclusive" ' . (($settings['tax_display'] ?? '') == 'exclusive' ? 'selected' : '') . '>Prices exclusive of tax</option>
-                                        </select>
-                                    </div>
-                                    <div class="col-md-12">
-                                        <label class="form-label">Tax Number</label>
-                                        <input type="text" name="tax_number" 
-                                               value="' . htmlspecialchars($settings['tax_number'] ?? '') . '" 
-                                               class="form-control" placeholder="P000XXXXX">
-                                        <small class="text-muted">Your KRA PIN/VAT number</small>
+                                <!-- Tax Enable/Disable Toggle -->
+                                <div class="form-check form-switch mb-4">
+                                    <input class="form-check-input" type="checkbox" 
+                                           name="tax_enabled" value="1" 
+                                           id="taxEnabled"
+                                           ' . ((isset($settings['tax_enabled']) && $settings['tax_enabled'] == '1') ? 'checked' : '') . '>
+                                    <label class="form-check-label fw-bold" for="taxEnabled">
+                                        Enable Tax Calculation
+                                    </label>
+                                    <small class="text-muted d-block mt-1">
+                                        When enabled, tax will be calculated on all orders. When disabled, no tax will be added.
+                                    </small>
+                                </div>
+                                
+                                <div id="taxSettings" style="' . ((isset($settings['tax_enabled']) && $settings['tax_enabled'] == '0') ? 'display: none;' : '') . '">
+                                    <div class="row g-3">
+                                        <div class="col-md-6">
+                                            <label class="form-label">Tax Rate (%) *</label>
+                                            <input type="number" name="tax_rate" 
+                                                   value="' . htmlspecialchars($settings['tax_rate'] ?? '16') . '" 
+                                                   class="form-control" step="0.01" min="0" max="100" required>
+                                            <small class="text-muted">VAT rate (16% standard for Kenya)</small>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label">Tax Display *</label>
+                                            <select name="tax_display" class="form-select" required>
+                                                <option value="inclusive" ' . (($settings['tax_display'] ?? 'inclusive') == 'inclusive' ? 'selected' : '') . '>Prices inclusive of tax</option>
+                                                <option value="exclusive" ' . (($settings['tax_display'] ?? '') == 'exclusive' ? 'selected' : '') . '>Prices exclusive of tax</option>
+                                                <option value="both" ' . (($settings['tax_display'] ?? '') == 'both' ? 'selected' : '') . '>Show both (inclusive & exclusive)</option>
+                                            </select>
+                                            <small class="text-muted">How tax is displayed to customers</small>
+                                        </div>
+                                        <div class="col-md-12">
+                                            <label class="form-label">Tax Number (KRA PIN)</label>
+                                            <input type="text" name="tax_number" 
+                                                   value="' . htmlspecialchars($settings['tax_number'] ?? '') . '" 
+                                                   class="form-control" placeholder="P000XXXXX">
+                                            <small class="text-muted">Your KRA PIN/VAT number for invoices</small>
+                                        </div>
+                                        
+                                        <!-- Tax Preview -->
+                                        <div class="col-md-12 mt-3">
+                                            <div class="card bg-light">
+                                                <div class="card-body">
+                                                    <h6 class="fw-bold mb-3">Tax Preview</h6>
+                                                    <div class="row">
+                                                        <div class="col-md-6">
+                                                            <div class="mb-2">
+                                                                <span class="text-muted">Product Price:</span>
+                                                                <span class="fw-bold float-end">Ksh 1,000.00</span>
+                                                            </div>
+                                                            <div class="mb-2">
+                                                                <span class="text-muted">Tax (@<span id="previewTaxRate">' . ($settings['tax_rate'] ?? '16') . '</span>%):</span>
+                                                                <span class="fw-bold float-end" id="previewTaxAmount">Ksh 160.00</span>
+                                                            </div>
+                                                            <div class="mb-2">
+                                                                <span class="fw-bold">Total Price:</span>
+                                                                <span class="fw-bold text-blue float-end" id="previewTotalPrice">Ksh 1,160.00</span>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-md-6">
+                                                            <div class="alert alert-info small mb-0">
+                                                                <strong>Display Mode:</strong> 
+                                                                <span id="previewDisplayMode">';
+                                                                    
+        $displayMode = $settings['tax_display'] ?? 'inclusive';
+        if ($displayMode == 'inclusive') {
+            $content .= 'Price shown includes tax';
+        } elseif ($displayMode == 'exclusive') {
+            $content .= 'Price shown excludes tax (tax added at checkout)';
+        } else {
+            $content .= 'Price shows both inclusive & exclusive amounts';
+        }
+        
+        $content .= '</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -888,7 +954,7 @@ document.getElementById(\'zoneForm\').addEventListener(\'submit\', function(e) {
     const formData = new FormData(this);
     
     // Use fetch for FormData support
-    fetch(\'ajax/shipping_zones.php\', {
+    fetch(window.location.origin + \'/linen-closet/admin/ajax/shipping_zones.php\', {
         method: \'POST\',
         body: formData
     })
@@ -967,6 +1033,90 @@ document.getElementById(\'zoneForm\').addEventListener(\'submit\', function(e) {
 });
     });
 }
+    // Tax settings toggle
+const taxEnabledCheckbox = document.getElementById(\'taxEnabled\');
+const taxSettingsDiv = document.getElementById(\'taxSettings\');
+
+if (taxEnabledCheckbox && taxSettingsDiv) {
+    function toggleTaxSettings() {
+        if (taxEnabledCheckbox.checked) {
+            taxSettingsDiv.style.display = \'block\';
+            // Enable required fields
+            taxSettingsDiv.querySelectorAll(\'[required]\').forEach(field => {
+                field.required = true;
+            });
+        } else {
+            taxSettingsDiv.style.display = \'none\';
+            // Disable required fields
+            taxSettingsDiv.querySelectorAll(\'[required]\').forEach(field => {
+                field.required = false;
+            });
+        }
+    }
+    
+    taxEnabledCheckbox.addEventListener(\'change\', toggleTaxSettings);
+    toggleTaxSettings(); // Initial state
+}
+
+// Tax preview calculation
+function updateTaxPreview() {
+    const taxRate = document.querySelector(\'input[name="tax_rate"]\')?.value || 16;
+    const taxDisplay = document.querySelector(\'select[name="tax_display"]\')?.value || \'inclusive\';
+    
+    const basePrice = 1000;
+    const taxAmount = basePrice * (taxRate / 100);
+    const totalPrice = basePrice + taxAmount;
+    
+    // Update preview elements if they exist
+    const previewTaxRate = document.getElementById(\'previewTaxRate\');
+    const previewTaxAmount = document.getElementById(\'previewTaxAmount\');
+    const previewTotalPrice = document.getElementById(\'previewTotalPrice\');
+    const previewDisplayMode = document.getElementById(\'previewDisplayMode\');
+    
+    if (previewTaxRate) previewTaxRate.textContent = taxRate;
+    if (previewTaxAmount) previewTaxAmount.textContent = \'Ksh \' + taxAmount.toFixed(2);
+    
+    if (previewTotalPrice) {
+        if (taxDisplay === \'inclusive\') {
+            previewTotalPrice.textContent = \'Ksh \' + totalPrice.toFixed(2);
+        } else {
+            previewTotalPrice.textContent = \'Ksh \' + basePrice.toFixed(2);
+        }
+    }
+    
+    if (previewDisplayMode) {
+        switch(taxDisplay) {
+            case \'inclusive\':
+                previewDisplayMode.textContent = \'Price shown includes tax\';
+                break;
+            case \'exclusive\':
+                previewDisplayMode.textContent = \'Price shown excludes tax (tax added at checkout)\';
+                break;
+            case \'both\':
+                previewDisplayMode.textContent = \'Price shows both inclusive & exclusive amounts\';
+                break;
+        }
+    }
+}
+
+// Add event listeners for tax input
+document.addEventListener(\'DOMContentLoaded\', function() {
+    const taxRateInput = document.querySelector(\'input[name="tax_rate"]\');
+    const taxDisplaySelect = document.querySelector(\'select[name="tax_display"]\');
+    
+    if (taxRateInput) {
+        taxRateInput.addEventListener(\'input\', updateTaxPreview);
+        taxRateInput.addEventListener(\'change\', updateTaxPreview);
+    }
+    
+    if (taxDisplaySelect) {
+        taxDisplaySelect.addEventListener(\'change\', updateTaxPreview);
+    }
+    
+    // Initial preview update
+    updateTaxPreview();
+});
+
 </script>
 ';
 

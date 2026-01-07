@@ -8,7 +8,7 @@ ini_set('display_errors', 1);
 require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/Database.php';
 require_once __DIR__ . '/../includes/App.php';
-
+require_once __DIR__ . '/../includes/TaxHelper.php';
 $app = new App();
 $db = $app->getDB();
 
@@ -69,6 +69,46 @@ try {
     $itemsStmt->execute([$orderId]);
     $orderItems = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
     
+    // Calculate subtotal from order items
+    $subtotal = 0;
+    foreach ($orderItems as $item) {
+        $subtotal += $item['total_price'];
+    }
+    
+    // Get tax info from ORDER DATA (not from current settings)
+    // The order already has tax_amount stored if tax was enabled during checkout
+    if (isset($order['tax_amount']) && isset($order['tax_enabled'])) {
+        // Use the tax data stored with the order
+        $taxEnabled = $order['tax_enabled'] == '1';
+        $taxAmount = floatval($order['tax_amount']);
+        $taxRate = floatval($order['tax_rate'] ?? 0);
+    } else {
+        // Fallback: Get from current tax settings (for old orders that don't have tax data)
+        $taxSettings = TaxHelper::getTaxSettings($db);
+        $taxEnabled = $taxSettings['enabled'] == '1';
+        $taxRate = floatval($taxSettings['rate'] ?? 0);
+        
+        // Calculate tax based on current settings
+        if ($taxEnabled) {
+            $taxAmount = $subtotal * ($taxRate / 100);
+        } else {
+            $taxAmount = 0;
+        }
+    }
+    
+   // Calculate shipping cost - FIXED: Use stored shipping cost from order
+    // The checkout.php already stores shipping_cost in the order, so use it directly
+    if (isset($order['shipping_cost']) && $order['shipping_cost'] !== null) {
+        $shippingCost = floatval($order['shipping_cost']);
+    } else {
+        // Fallback: calculate from total if shipping_cost is not stored
+        if (isset($order['total_amount'])) {
+            $shippingCost = floatval($order['total_amount']) - $subtotal - $taxAmount;
+        } else {
+            $shippingCost = 0;
+        }
+    }
+    
 } catch (Exception $e) {
     // Log error and show generic message
     error_log("Order confirmation error: " . $e->getMessage());
@@ -98,14 +138,42 @@ try {
             $itemsStmt = $db->prepare("SELECT * FROM order_items WHERE order_id = ?");
             $itemsStmt->execute([$orderId]);
             $orderItems = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+            
+            // Calculate subtotal
+            $subtotal = 0;
+            foreach ($orderItems as $item) {
+                $subtotal += $item['total_price'];
+            }
+            
+            // Get tax info from order
+            $taxEnabled = isset($order['tax_enabled']) ? $order['tax_enabled'] == '1' : false;
+            $taxAmount = isset($order['tax_amount']) ? floatval($order['tax_amount']) : 0;
+            $taxRate = isset($order['tax_rate']) ? floatval($order['tax_rate']) : 0;
+            
+            // Calculate shipping
+            if (isset($order['shipping_cost'])) {
+                $shippingCost = floatval($order['shipping_cost']);
+            } else {
+                $shippingCost = 0;
+            }
         } else {
             $order = null;
             $orderItems = [];
+            $subtotal = 0;
+            $taxAmount = 0;
+            $shippingCost = 0;
+            $taxEnabled = false;
+            $taxRate = 0;
         }
     } catch (Exception $e2) {
         error_log("Even simpler query failed: " . $e2->getMessage());
         $order = null;
         $orderItems = [];
+        $subtotal = 0;
+        $taxAmount = 0;
+        $shippingCost = 0;
+        $taxEnabled = false;
+        $taxRate = 0;
     }
 }
 
@@ -239,12 +307,35 @@ require_once __DIR__ . '/../includes/header.php';
                                     <tr>
                                         <td colspan="4" class="text-end fw-bold">Subtotal:</td>
                                         <td class="text-center fw-bold">
-                                            Ksh <?php 
-                                            $subtotal = array_sum(array_column($orderItems, 'total_price'));
-                                            echo number_format($subtotal, 2); 
-                                            ?>
+                                            Ksh <?php echo number_format($subtotal, 2); ?>
                                         </td>
                                     </tr>
+                                    
+                                    <!-- Shipping row -->
+                                    <tr>
+                                        <td colspan="4" class="text-end">Shipping:</td>
+                                        <td class="text-center">
+                                            <?php if ($shippingCost == 0): ?>
+                                                <span class="text-success">FREE</span>
+                                            <?php else: ?>
+                                                Ksh <?php echo number_format($shippingCost, 2); ?>
+                                            <?php endif; ?>
+                                        </td>
+                                    </tr>
+                                    
+                                    <!-- Tax row - ONLY show if tax was enabled AND tax amount > 0 for this order -->
+                                    <?php if ($taxEnabled && isset($order['tax_amount']) && floatval($order['tax_amount']) > 0): ?>
+                                        <tr>
+                                            <td colspan="4" class="text-end">Tax (<?php echo $taxRate; ?>%):</td>
+                                            <td class="text-center">
+                                                Ksh <?php 
+                                                // Use stored tax amount from order if available
+                                                echo isset($order['tax_amount']) ? number_format(floatval($order['tax_amount']), 2) : number_format($taxAmount, 2); 
+                                                ?>
+                                            </td>
+                                        </tr>
+                                    <?php endif; ?>
+
                                     <tr>
                                         <td colspan="4" class="text-end fw-bold">Total:</td>
                                         <td class="text-center fw-bold fs-5 text-success">
@@ -330,7 +421,6 @@ require_once __DIR__ . '/../includes/header.php';
                                     <i class="fas fa-shipping-fast me-2"></i>
                                     <strong>
                                         <?php 
-                                        $shippingCost = $order['total_amount'] - $subtotal - ($subtotal * 0.16);
                                         if ($shippingCost == 0) {
                                             echo 'Standard Shipping (FREE)';
                                         } elseif ($shippingCost == 300) {
@@ -400,10 +490,18 @@ require_once __DIR__ . '/../includes/header.php';
                                         <?php endif; ?>
                                     </span>
                                 </div>
-                                <div class="d-flex justify-content-between mb-2">
-                                    <span>Tax (16% VAT):</span>
-                                    <span>Ksh <?php echo number_format($subtotal * 0.16, 2); ?></span>
-                                </div>
+                                <?php 
+                                    // Check if tax was actually applied to this order
+                                    $orderTaxEnabled = isset($order['tax_enabled']) ? $order['tax_enabled'] == '1' : $taxEnabled;
+                                    $orderTaxAmount = isset($order['tax_amount']) ? floatval($order['tax_amount']) : $taxAmount;
+                                    $orderTaxRate = isset($order['tax_rate']) ? floatval($order['tax_rate']) : $taxRate;
+
+                                    if ($orderTaxEnabled && $orderTaxAmount > 0): ?>
+                                        <div class="d-flex justify-content-between mb-2">
+                                            <span>Tax (<?php echo $orderTaxRate; ?>% VAT):</span>
+                                            <span>Ksh <?php echo number_format($orderTaxAmount, 2); ?></span>
+                                        </div>
+                                <?php endif; ?>
                                 <hr>
                                 <div class="d-flex justify-content-between">
                                     <strong>Total:</strong>

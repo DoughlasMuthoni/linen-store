@@ -1,5 +1,5 @@
 <?php
-// /linen-closet/ajax/remove-from-cart.php - UPDATED
+// /linen-closet/ajax/remove-from-cart.php - UPDATED WITH TAXHELPER
 
 session_start();
 header('Content-Type: application/json');
@@ -29,6 +29,27 @@ try {
     if (isset($_SESSION['cart'][$cartKey])) {
         unset($_SESSION['cart'][$cartKey]);
         
+        // Get database connection and tax settings
+        $taxSettings = ['enabled' => '1', 'rate' => 16.0]; // Default values
+        
+        try {
+            // Include required files
+            require_once __DIR__ . '/../includes/config.php';
+            require_once __DIR__ . '/../includes/Database.php';
+            require_once __DIR__ . '/../includes/App.php';
+            require_once __DIR__ . '/../includes/TaxHelper.php'; // Include the helper
+            
+            $app = new App();
+            $db = $app->getDB();
+            
+            if ($db) {
+                // Use TaxHelper to get tax settings
+                $taxSettings = TaxHelper::getTaxSettings($db);
+            }
+        } catch (Exception $e) {
+            error_log("Tax settings error in remove-from-cart: " . $e->getMessage());
+        }
+        
         // Count cart items and prepare items array
         $cartCount = 0;
         $subtotal = 0;
@@ -55,7 +76,9 @@ try {
         }
         
         $shipping = ($subtotal >= 5000) ? 0 : 300;
-        $tax = $subtotal * 0.16;
+        
+        // Calculate tax using TaxHelper
+        $tax = TaxHelper::calculateTax($subtotal, $taxSettings);
         $total = $subtotal + $shipping + $tax;
         
         $response['success'] = true;
@@ -66,6 +89,8 @@ try {
             'shipping' => round($shipping, 2),
             'tax' => round($tax, 2),
             'total' => round($total, 2),
+            'tax_enabled' => $taxSettings['enabled'],
+            'tax_rate' => $taxSettings['rate'],
             'items' => $items // Make sure items array is included
         ];
     } else {
