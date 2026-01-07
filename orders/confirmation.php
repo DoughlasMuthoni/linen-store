@@ -219,10 +219,29 @@ require_once __DIR__ . '/../includes/header.php';
                             Order Number: <strong><?php echo htmlspecialchars($order['order_number']); ?></strong>
                         </h5>
                     </div>
+                
                 </div>
             </div>
         </div>
-        
+         <!-- ADD THE EMAIL CONFIRMATION MESSAGE RIGHT HERE -->
+        <div class="row mb-4">
+            <div class="col-lg-8 mx-auto">
+                <div class="alert alert-info">
+                    <h5 class="alert-heading">
+                        <i class="fas fa-envelope me-2"></i> Order Confirmation Email Sent
+                    </h5>
+                    <p class="mb-2">
+                        A confirmation email has been sent to 
+                        <strong><?php echo htmlspecialchars($order['email'] ?? $order['customer_email'] ?? 'your email address'); ?></strong>
+                    </p>
+                    <p class="mb-0 small">
+                        <i class="fas fa-exclamation-triangle me-1"></i>
+                        If you don't see it within a few minutes, please check your spam folder.
+                    </p>
+                </div>
+            </div>
+        </div>
+        <!-- END EMAIL CONFIRMATION MESSAGE -->
         <div class="row">
             <!-- Order Details -->
             <div class="col-lg-8 mb-4">

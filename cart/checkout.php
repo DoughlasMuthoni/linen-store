@@ -471,38 +471,79 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 
                 $db->commit();
-                
+                            
+
                 // Clear cart
                 unset($_SESSION['cart']);
 
+                // ========== SEND ORDER CONFIRMATION EMAIL ==========
                 try {
-                    // Initialize PHPMailerEmail
-                    $emailer = new PHPMailerEmail();
+                    error_log("=== STARTING EMAIL PROCESS ===");
+                    error_log("Order ID: $orderId, Order Number: $orderNumber");
+                    // Include and initialize Email class
+                    require_once __DIR__ . '/../includes/Email.php';
+                    $emailer = new Email();
                     
                     // Get customer email and name
                     $customerEmail = $user['email'] ?? '';
                     $customerName = trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? ''));
                     $customerName = !empty($customerName) ? $customerName : ($user['username'] ?? 'Customer');
-                    
+                    error_log("Customer Email: $customerEmail, Customer Name: $customerName");
                     if (!empty($customerEmail)) {
+                        // Build order data for email
+                        $orderData = [
+                            'order_number' => $orderNumber,
+                            'customer_name' => $customerName,
+                            'subtotal' => $subtotal,
+                            'shipping' => $shippingCost,
+                            'tax' => $finalTaxAmount,
+                            'total' => $finalTotal,
+                            'status' => 'pending',
+                            'shipping_address' => $shippingAddress,
+                            'order_date' => date('F j, Y'),
+                            'items' => []
+                        ];
+                        
+                        // Add order items from cartItems
+                        foreach ($cartItems as $item) {
+                            $orderData['items'][] = [
+                                'product_name' => $item['product']['name'] ?? 'Product',
+                                'quantity' => $item['quantity'],
+                                'price' => $item['price']
+                            ];
+                        }
+                        
                         // Send confirmation email
-                        $emailSent = $emailer->sendOrderConfirmation($orderId, $customerEmail, $customerName);
+                        $emailSent = $emailer->sendOrderConfirmation($orderData, $customerEmail, $customerName);
                         
                         if ($emailSent) {
-                            error_log("✅ Order confirmation email sent to: " . $customerEmail);
+                            error_log("✅ ORDER #$orderNumber: Email sent to: " . $customerEmail);
+                            
+                            // Log to email_logs table if it exists
+                            try {
+                                $logStmt = $db->prepare("
+                                    INSERT INTO email_logs (order_id, email_type, recipient, sent_at, status)
+                                    VALUES (?, 'order_confirmation', ?, NOW(), 'sent')
+                                ");
+                                $logStmt->execute([$orderId, $customerEmail]);
+                            } catch (Exception $e) {
+                                // Table might not exist, that's OK
+                                error_log("Note: Could not log email to database: " . $e->getMessage());
+                            }
                         } else {
-                            error_log("❌ Failed to send order confirmation email to: " . $customerEmail);
+                            error_log("❌ ORDER #$orderNumber: Failed to send email to: " . $customerEmail);
                         }
                     } else {
-                        error_log("⚠️ Customer email not found for order #" . $orderNumber);
+                        error_log("⚠️ ORDER #$orderNumber: No customer email found, cannot send confirmation");
                     }
                     
                 } catch (Exception $e) {
-                    error_log("Email sending error: " . $e->getMessage());
-                    // Don't stop the checkout flow if email fails
+                    // Don't stop checkout if email fails
+                    error_log("Email sending error (non-fatal): " . $e->getMessage());
                 }
                 // ========== END EMAIL SENDING ==========
-                
+
+
                 // Redirect to order confirmation
                 $redirectUrl = SITE_URL . 'orders/confirmation.php?order_id=' . $orderId . '&order_number=' . urlencode($orderNumber);
                 header('Location: ' . $redirectUrl);
