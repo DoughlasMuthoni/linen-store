@@ -36,6 +36,19 @@ $firstName = $_SESSION['first_name'] ?? '';
 $isLoggedIn = $app->isLoggedIn();
 $isAdmin = $app->isAdmin();
 
+// Better cart count detection
+$cartCount = 0;
+if (isset($_SESSION['cart'])) {
+    if (is_array($_SESSION['cart'])) {
+        $cartCount = count($_SESSION['cart']);
+    } elseif (is_numeric($_SESSION['cart'])) {
+        $cartCount = (int)$_SESSION['cart'];
+    }
+}
+
+// Debug: Force show count for testing
+// $cartCount = 3; // Remove this after testing
+
 // ====================================================================
 // 3. DATABASE CONNECTION (FOR CATEGORIES)
 // ====================================================================
@@ -95,37 +108,31 @@ $fullTitle = htmlspecialchars($pageTitle) . ' | ' . htmlspecialchars(SITE_NAME);
     
     <!-- Custom CSS -->
     <link href="<?php echo SITE_URL; ?>assets/css/style.css" rel="stylesheet">
-   <!-- In header.php or layout file -->
-<!-- <script src="<?php echo SITE_URL; ?>assets/js/wishlist.js"></script> -->
+    
     <!-- Favicon -->
     <link rel="icon" type="image/x-icon" href="<?php echo SITE_URL; ?>assets/favicon.ico">
     
     <style>
-       :root {
-        --primary-color: #4361ee;
-        --primary-light: #eef2ff;
-        --secondary-color: #3a0ca3;
-        --accent-color: #f72585;
-        --dark-color: #1a1a2e;
-        --light-color: #f8f9fa;
-        --success-color: #4cc9f0;
-        --warning-color: #f8961e;
-        --danger-color: #f94144;
-    }
+        :root {
+            --primary-color: #4361ee;
+            --primary-light: #eef2ff;
+            --secondary-color: #3a0ca3;
+            --accent-color: #f72585;
+            --dark-color: #1a1a2e;
+            --light-color: #f8f9fa;
+            --success-color: #4cc9f0;
+            --warning-color: #f8961e;
+            --danger-color: #f94144;
+        }
         
         .navbar-brand {
             font-weight: 700;
             font-size: 1.5rem;
             color: var(--primary-color) !important;
-            transition: opacity var(--transition-speed) ease;
-        }
-        
-        .navbar-brand:hover {
-            opacity: 0.8;
         }
         
         .navbar {
-            box-shadow: var(--box-shadow);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
             padding: 0.75rem 0;
             background: white !important;
         }
@@ -134,45 +141,25 @@ $fullTitle = htmlspecialchars($pageTitle) . ' | ' . htmlspecialchars(SITE_NAME);
             font-weight: 500;
             color: var(--primary-color) !important;
             padding: 0.5rem 1rem !important;
-            border-radius: var(--border-radius);
-            transition: all var(--transition-speed) ease;
+            border-radius: 8px;
+            transition: all 0.3s ease;
         }
         
-        .nav-link:hover, .nav-link:focus {
-            background-color: rgba(33, 37, 41, 0.05);
-            transform: translateY(-1px);
+        .nav-link:hover {
+            background-color: rgba(67, 97, 238, 0.1);
         }
         
         .dropdown-menu {
             border: none;
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
-            border-radius: var(--border-radius);
+            border-radius: 12px;
             padding: 0.5rem;
-            min-width: 220px;
-            margin-top: 0.5rem;
-        }
-        
-        .dropdown-item {
-            padding: 0.65rem 1rem;
-            border-radius: var(--border-radius);
-            margin: 0.15rem 0;
-            transition: all var(--transition-speed) ease;
-        }
-        
-        .dropdown-item:hover, .dropdown-item:focus {
-            background-color: rgba(33, 37, 41, 0.05);
         }
         
         .search-input {
             border-radius: 25px;
             padding-left: 2.5rem;
             border: 1px solid #e1e5eb;
-            transition: all var(--transition-speed) ease;
-        }
-        
-        .search-input:focus {
-            border-color: var(--primary-color);
-            box-shadow: 0 0 0 0.2rem rgba(33, 37, 41, 0.1);
         }
         
         .search-btn {
@@ -183,7 +170,6 @@ $fullTitle = htmlspecialchars($pageTitle) . ' | ' . htmlspecialchars(SITE_NAME);
             background: none;
             border: none;
             color: var(--accent-color);
-            cursor: pointer;
         }
         
         .badge-notification {
@@ -198,15 +184,12 @@ $fullTitle = htmlspecialchars($pageTitle) . ' | ' . htmlspecialchars(SITE_NAME);
             border-radius: 25px;
             padding: 0.5rem 1.5rem;
             font-weight: 500;
-            transition: all var(--transition-speed) ease;
             border: none;
         }
         
         .btn-login:hover {
-            background:var(--primary-color);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-             color: white;
+            background: var(--secondary-color);
+            color: white;
         }
         
         .user-avatar {
@@ -222,52 +205,89 @@ $fullTitle = htmlspecialchars($pageTitle) . ' | ' . htmlspecialchars(SITE_NAME);
             text-transform: uppercase;
         }
         
-        .navbar-toggler {
-            border: none;
-            padding: 0.25rem 0.5rem;
-        }
-        
-        .navbar-toggler:focus {
-            box-shadow: none;
-        }
-        
-        .mobile-search {
-            background: #f8f9fa;
-            border-radius: var(--border-radius);
-            padding: 1rem;
-            margin: 0.5rem 0;
-        }
-        
-        /* Flash message styles */
+        /* Flash message */
         .flash-message-container {
             position: fixed;
             top: 80px;
             right: 20px;
             z-index: 9999;
             max-width: 350px;
-            animation: slideIn 0.3s ease-out;
         }
         
-        @keyframes slideIn {
-            from {
-                transform: translateX(100%);
-                opacity: 0;
+        /* Mobile Bottom Tab */
+        @media (max-width: 991.98px) {
+            /* Adjust main content padding */
+            main.container-fluid {
+                padding-bottom: 70px !important;
             }
-            to {
-                transform: translateX(0);
-                opacity: 1;
+            
+            /* Bottom tab container */
+            .mobile-bottom-tab {
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                background: white;
+                box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.1);
+                border-top: 1px solid #dee2e6;
+                z-index: 1000;
+            }
+            
+            /* Tab items */
+            .mobile-tab-item {
+                padding: 12px 0;
+                text-align: center;
+                transition: all 0.2s ease;
+            }
+            
+            .mobile-tab-item:hover {
+                background-color: rgba(0, 0, 0, 0.02);
+            }
+            
+            .mobile-tab-item a {
+                color: #6c757d;
+                text-decoration: none;
+                display: block;
+            }
+            
+            .mobile-tab-item.active a {
+                color: var(--primary-color);
+            }
+            
+            .mobile-tab-item i {
+                font-size: 1.25rem;
+                display: block;
+                margin-bottom: 4px;
+            }
+            
+            .mobile-tab-item .small {
+                font-size: 0.75rem;
+            }
+            
+            /* Cart badge - FIXED POSITION */
+        .mobile-cart-badge {
+            position: absolute;
+            top: 5px !important;
+            right: calc(50% - 20px) !important;
+            font-size: 0.65rem !important;
+            padding: 0.2rem 0.4rem !important;
+            min-width: 18px;
+            height: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            z-index: 1001;
+        }
+            
+            /* Hide desktop cart on mobile */
+            .nav-link[href*="cart"] {
+                display: none !important;
             }
         }
         
         @media (max-width: 991.98px) {
-            .navbar-collapse {
-                padding: 1rem 0;
-            }
-            
-            .nav-item {
-                margin-bottom: 0.25rem;
-            }
-            
             .flash-message-container {
                 top: 60px;
                 left: 20px;
@@ -275,8 +295,6 @@ $fullTitle = htmlspecialchars($pageTitle) . ' | ' . htmlspecialchars(SITE_NAME);
                 max-width: none;
             }
         }
-
-        
     </style>
 </head>
 <body>
@@ -301,7 +319,7 @@ $fullTitle = htmlspecialchars($pageTitle) . ' | ' . htmlspecialchars(SITE_NAME);
 
     <!-- Navigation -->
     <nav class="navbar navbar-expand-lg navbar-light sticky-top">
-        <div class="container">
+        <div class="container-fluid px-2">
             <!-- Logo -->
             <a class="navbar-brand" href="<?php echo SITE_URL; ?>">
                 <i class="fas fa-tshirt me-2"></i><?php echo htmlspecialchars(SITE_NAME); ?>
@@ -326,32 +344,29 @@ $fullTitle = htmlspecialchars($pageTitle) . ' | ' . htmlspecialchars(SITE_NAME);
             <div class="d-flex align-items-center">
                 <!-- Desktop Actions -->
                 <div class="d-none d-lg-flex align-items-center">
-                    
                     <!-- Wishlist -->
-<a href="<?php echo SITE_URL; ?>account/wishlist.php" class="nav-link position-relative me-2" 
-   data-bs-toggle="tooltip" title="Wishlist" aria-label="Wishlist">
-    <i class="fas fa-heart fa-lg"></i>
-    <?php
-    $wishlistCount = isset($_SESSION['wishlist']) ? count($_SESSION['wishlist']) : 0;
-    if ($wishlistCount > 0): ?>
-        <span class="position-absolute top-0 start-100 translate-middle badge badge-notification bg-danger wishlist-count">
-            <?php echo $wishlistCount; ?>
-        </span>
-    <?php else: ?>
-        <span class="position-absolute top-0 start-100 translate-middle badge badge-notification bg-danger wishlist-count d-none">
-            0
-        </span>
-    <?php endif; ?>
-</a>
+                    <a href="<?php echo SITE_URL; ?>account/wishlist.php" class="nav-link position-relative me-2" 
+                       data-bs-toggle="tooltip" title="Wishlist" aria-label="Wishlist">
+                        <i class="fas fa-heart fa-lg"></i>
+                        <?php
+                        $wishlistCount = isset($_SESSION['wishlist']) ? count($_SESSION['wishlist']) : 0;
+                        if ($wishlistCount > 0): ?>
+                            <span class="position-absolute top-0 start-100 translate-middle badge badge-notification bg-danger wishlist-count">
+                                <?php echo $wishlistCount; ?>
+                            </span>
+                        <?php else: ?>
+                            <span class="position-absolute top-0 start-100 translate-middle badge badge-notification bg-danger wishlist-count d-none">
+                                0
+                            </span>
+                        <?php endif; ?>
+                    </a>
                     
-                    <!-- In your header/navigation -->
-
-                    <!-- Cart -->
+                    <!-- Cart (Desktop) -->
                     <a href="<?php echo SITE_URL; ?>cart" class="nav-link position-relative me-3" 
                        data-bs-toggle="tooltip" title="Cart" aria-label="Shopping Cart">
                         <i class="fas fa-shopping-bag fa-lg"></i>
                         <span class="position-absolute top-0 start-100 translate-middle badge badge-notification bg-danger cart-count">
-                            0
+                            <?php echo $cartCount; ?>
                         </span>
                     </a>
                     
@@ -377,9 +392,10 @@ $fullTitle = htmlspecialchars($pageTitle) . ' | ' . htmlspecialchars(SITE_NAME);
                                 <li><a class="dropdown-item" href="<?php echo SITE_URL; ?>account/account.php"><i class="fas fa-user me-2"></i>My Account</a></li>
                                 <li><a class="dropdown-item" href="<?php echo SITE_URL; ?>account/orders.php"><i class="fas fa-box me-2"></i>My Orders</a></li>
                                 <li><a class="dropdown-item" href="<?php echo SITE_URL; ?>account/wishlist.php"><i class="fas fa-heart me-2"></i>Wishlist 
-    <?php if ($wishlistCount > 0): ?>
-        <span class="badge bg-danger float-end"><?php echo $wishlistCount; ?></span>
-    <?php endif; ?></li>
+                                    <?php if ($wishlistCount > 0): ?>
+                                        <span class="badge bg-danger float-end"><?php echo $wishlistCount; ?></span>
+                                    <?php endif; ?>
+                                </a></li>
                                 <?php if($isAdmin): ?>
                                     <li><hr class="dropdown-divider"></li>
                                     <li><a class="dropdown-item text-success" href="<?php echo SITE_URL; ?>admin/dashboard"><i class="fas fa-shield-alt me-2"></i>Admin Panel</a></li>
@@ -460,25 +476,16 @@ $fullTitle = htmlspecialchars($pageTitle) . ' | ' . htmlspecialchars(SITE_NAME);
                         </a>
                     </li>
                     
-                    <!-- Mobile-only menu items -->
+                    <!-- Mobile-only wishlist (kept) -->
                     <li class="nav-item d-lg-none">
-                       <!-- Mobile-only menu items -->
-   <a class="nav-link <?php echo ($pageTitle === 'Wishlist') ? 'active' : ''; ?>" 
-       href="<?php echo SITE_URL; ?>account/wishlist.php">
-        <i class="fas fa-heart me-2"></i>Wishlist
-        <?php if ($wishlistCount > 0): ?>
-            <span class="badge bg-danger float-end wishlist-count"><?php echo $wishlistCount; ?></span>
-        <?php else: ?>
-            <span class="badge bg-danger float-end wishlist-count d-none">0</span>
-        <?php endif; ?>
-    </a>
-                    </li>
-                    
-                    <li class="nav-item d-lg-none">
-                        <a class="nav-link <?php echo ($pageTitle === 'Cart') ? 'active' : ''; ?>" 
-                           href="<?php echo SITE_URL; ?>cart">
-                            <i class="fas fa-shopping-bag me-2"></i>Cart
-                            <span class="badge bg-danger float-end cart-count">0</span>
+                        <a class="nav-link <?php echo ($pageTitle === 'Wishlist') ? 'active' : ''; ?>" 
+                           href="<?php echo SITE_URL; ?>account/wishlist.php">
+                            <i class="fas fa-heart me-2"></i>Wishlist
+                            <?php if ($wishlistCount > 0): ?>
+                                <span class="badge bg-danger float-end wishlist-count"><?php echo $wishlistCount; ?></span>
+                            <?php else: ?>
+                                <span class="badge bg-danger float-end wishlist-count d-none">0</span>
+                            <?php endif; ?>
                         </a>
                     </li>
                 </ul>
@@ -490,7 +497,7 @@ $fullTitle = htmlspecialchars($pageTitle) . ' | ' . htmlspecialchars(SITE_NAME);
                             <div class="card-body">
                                 <h6 class="card-title">Welcome, <?php echo htmlspecialchars($firstName); ?></h6>
                                 <div class="d-grid gap-2">
-                                    <a href="<?php echo SITE_URL; ?>account" class="btn btn-outline-dark">
+                                    <a href="<?php echo SITE_URL; ?>account/account.php" class="btn btn-outline-dark">
                                         <i class="fas fa-user me-2"></i>My Account
                                     </a>
                                     <?php if($isAdmin): ?>
@@ -519,5 +526,90 @@ $fullTitle = htmlspecialchars($pageTitle) . ' | ' . htmlspecialchars(SITE_NAME);
         </div>
     </nav>
 
+    <!-- ====================================================================
+         MOBILE BOTTOM TAB (Only visible on mobile)
+         ==================================================================== -->
+    <div class="d-block d-lg-none mobile-bottom-tab">
+        <div class="container-fluid">
+            <div class="row text-center">
+                <!-- Home Tab -->
+                <div class="col-3 mobile-tab-item <?php echo ($pageTitle === 'Home') ? 'active' : ''; ?>">
+                    <a href="<?php echo SITE_URL; ?>">
+                        <i class="fas fa-home"></i>
+                        <div class="small">Home</div>
+                    </a>
+                </div>
+                
+                <!-- Shop Tab -->
+                <div class="col-3 mobile-tab-item">
+                    <div class="dropdown">
+                        <a href="#" class="dropdown-toggle text-decoration-none" 
+                           data-bs-toggle="dropdown" aria-expanded="false"
+                           style="color: inherit;">
+                            <i class="fas fa-store"></i>
+                            <div class="small">Shop</div>
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-center" style="margin-bottom: 60px;">
+                            <li><a class="dropdown-item" href="<?php echo SITE_URL; ?>products/new"><i class="fas fa-star me-2"></i>New Arrivals</a></li>
+                            <li><a class="dropdown-item" href="<?php echo SITE_URL; ?>products/bestsellers"><i class="fas fa-fire me-2"></i>Best Sellers</a></li>
+                            <?php if(!empty($mainCategories)): ?>
+                                <?php foreach ($mainCategories as $category): ?>
+                                    <li>
+                                        <a class="dropdown-item" href="<?php echo SITE_URL; ?>products?category=<?php echo urlencode($category['slug']); ?>">
+                                            <i class="fas fa-tag me-2"></i><?php echo htmlspecialchars($category['name']); ?>
+                                        </a>
+                                    </li>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </ul>
+                    </div>
+                </div>
+                
+                <!-- Cart Tab -->
+                <div class="col-3 mobile-tab-item position-relative <?php echo ($pageTitle === 'Cart') ? 'active' : ''; ?>">
+                    <a href="<?php echo SITE_URL; ?>cart" class="position-relative">
+                        <i class="fas fa-shopping-bag"></i>
+                        <div class="small">Cart</div>
+                        <!-- ALWAYS show badge, but hide when 0 -->
+                        <span class="badge bg-danger mobile-cart-badge" id="mobileCartBadge" 
+                              style="<?php echo $cartCount > 0 ? '' : 'display: none;'; ?>">
+                            <?php echo $cartCount; ?>
+                        </span>
+                    </a>
+                </div>
+                
+                <!-- Account Tab -->
+                <div class="col-3 mobile-tab-item">
+                    <?php if($isLoggedIn): ?>
+                        <div class="dropdown">
+                            <a href="#" class="dropdown-toggle text-decoration-none" 
+                               data-bs-toggle="dropdown" aria-expanded="false"
+                               style="color: inherit;">
+                                <i class="fas fa-user"></i>
+                                <div class="small">Account</div>
+                            </a>
+                            <ul class="dropdown-menu dropdown-menu-end" style="margin-bottom: 60px;">
+                                <li><a class="dropdown-item" href="<?php echo SITE_URL; ?>account/account.php"><i class="fas fa-user me-2"></i>My Account</a></li>
+                                <li><a class="dropdown-item" href="<?php echo SITE_URL; ?>account/orders.php"><i class="fas fa-box me-2"></i>Orders</a></li>
+                                <li><a class="dropdown-item" href="<?php echo SITE_URL; ?>account/wishlist.php"><i class="fas fa-heart me-2"></i>Wishlist</a></li>
+                                <?php if($isAdmin): ?>
+                                    <li><hr class="dropdown-divider"></li>
+                                    <li><a class="dropdown-item" href="<?php echo SITE_URL; ?>admin/dashboard"><i class="fas fa-shield-alt me-2"></i>Admin</a></li>
+                                <?php endif; ?>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item text-danger" href="<?php echo SITE_URL; ?>auth/logout"><i class="fas fa-sign-out-alt me-2"></i>Logout</a></li>
+                            </ul>
+                        </div>
+                    <?php else: ?>
+                        <a href="<?php echo SITE_URL; ?>auth/login">
+                            <i class="fas fa-sign-in-alt"></i>
+                            <div class="small">Login</div>
+                        </a>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Main Content Container -->
-    <main class="container-fluid px-0">
+    <main class="container-fluid px-2">

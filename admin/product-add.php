@@ -101,7 +101,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Convert numeric values
         $productData['price'] = floatval($productData['price']);
         $productData['compare_price'] = !empty($productData['compare_price']) ? floatval($productData['compare_price']) : null;
-        $productData['stock_quantity'] = intval($productData['stock_quantity']);
         $productData['weight'] = !empty($productData['weight']) ? floatval($productData['weight']) : null;
         
         // Start transaction
@@ -112,12 +111,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             INSERT INTO products (
                 name, slug, description, short_description, 
                 price, compare_price, category_id, brand_id,
-                sku, stock_quantity, is_featured, is_active,
+                sku, is_featured, is_active,
                 care_instructions, materials, weight, dimensions,
                 created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
         ");
-        
+
         $stmt->execute([
             $productData['name'],
             $productData['slug'],
@@ -128,7 +127,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $productData['category_id'],
             $productData['brand_id'],
             $productData['sku'],
-            $productData['stock_quantity'],
             $productData['is_featured'],
             $productData['is_active'],
             $productData['care_instructions'],
@@ -184,44 +182,113 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
         
-        // Handle variants
-        if (isset($_POST['variants']) && is_array($_POST['variants'])) {
-            $hasDefault = false;
-            foreach ($_POST['variants'] as $index => $variant) {
-                if (!empty($variant['size']) || !empty($variant['color'])) {
-                    $variantSku = !empty($variant['sku']) ? $variant['sku'] : $productData['sku'] . '-' . substr(uniqid(), -6);
-                    $variantPrice = !empty($variant['price']) ? floatval($variant['price']) : $productData['price'];
-                    $stockQuantity = intval($variant['stock_quantity'] ?? $productData['stock_quantity']);
-                    $isDefault = isset($variant['is_default']) && $variant['is_default'] == '1' ? 1 : 0;
-                    
-                    // Ensure only one default variant
-                    if ($isDefault && $hasDefault) {
-                        $isDefault = 0;
-                    }
-                    if ($isDefault) {
-                        $hasDefault = true;
-                    }
-                    
-                    $variantStmt = $db->prepare("
-                        INSERT INTO product_variants (
-                            product_id, sku, size, color, color_code, price, 
-                            compare_price, stock_quantity, is_default
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ");
-                    
-                    $variantStmt->execute([
-                        $productId,
-                        $variantSku,
-                        !empty($variant['size']) ? $variant['size'] : null,
-                        !empty($variant['color']) ? $variant['color'] : null,
-                        !empty($variant['color_code']) ? '#' . ltrim($variant['color_code'], '#') : null,
-                        $variantPrice,
-                        !empty($variant['compare_price']) ? floatval($variant['compare_price']) : null,
-                        $stockQuantity,
-                        $isDefault
-                    ]);
+      // Handle variants
+    if (isset($_POST['variants']) && is_array($_POST['variants'])) {
+        $hasDefault = false;
+        foreach ($_POST['variants'] as $index => $variant) {
+            if (!empty($variant['size']) || !empty($variant['color'])) {
+                // Generate initial variant SKU
+                if (!empty($variant['sku'])) {
+                    $variantSku = $variant['sku'];
+                } else {
+                    $variantSku = $productData['sku'] . '-' . substr(uniqid(), -6);
                 }
+                
+                $variantPrice = !empty($variant['price']) ? floatval($variant['price']) : $productData['price'];
+                $stockQuantity = intval($variant['stock_quantity'] ?? $productData['stock_quantity']);
+                $isDefault = isset($variant['is_default']) && $variant['is_default'] == '1' ? 1 : 0;
+                
+                // Ensure only one default variant
+                if ($isDefault && $hasDefault) {
+                    $isDefault = 0;
+                }
+                if ($isDefault) {
+                    $hasDefault = true;
+                }
+                
+                // ============================================
+                // ADD THIS: SKU UNIQUENESS CHECK
+                // ============================================
+                $originalSku = $variantSku;
+                $counter = 1;
+                $skuExists = true;
+                
+                while ($skuExists) {
+                    $checkStmt = $db->prepare("SELECT id FROM product_variants WHERE sku = ?");
+                    $checkStmt->execute([$variantSku]);
+                    
+                    if ($checkStmt->fetch()) {
+                        // SKU exists, append counter
+                        $variantSku = $originalSku . '-' . $counter;
+                        $counter++;
+                    } else {
+                        $skuExists = false;
+                    }
+                }
+                // ============================================
+                
+                $variantStmt = $db->prepare("
+                    INSERT INTO product_variants (
+                        product_id, sku, size, color, color_code, price, 
+                        compare_price, stock_quantity, is_default
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ");
+                
+                $variantStmt->execute([
+                    $productId,
+                    $variantSku,
+                    !empty($variant['size']) ? $variant['size'] : null,
+                    !empty($variant['color']) ? $variant['color'] : null,
+                    !empty($variant['color_code']) ? '#' . ltrim($variant['color_code'], '#') : null,
+                    $variantPrice,
+                    !empty($variant['compare_price']) ? floatval($variant['compare_price']) : null,
+                    $stockQuantity,
+                    $isDefault
+                ]);
             }
+        }
+    }
+
+// ============================================
+// ALSO UPDATE THE AUTO-CREATE DEFAULT VARIANT
+// ============================================
+// After product creation, ensure at least one default variant exists
+if ($productId) {
+    // Check if any variants were added
+    $variantCount = $db->prepare("SELECT COUNT(*) FROM product_variants WHERE product_id = ?");
+    $variantCount->execute([$productId]);
+    
+    if ($variantCount->fetchColumn() == 0) {
+        // Generate unique SKU for default variant
+        $baseSku = $productData['sku'];
+        $variantSku = $baseSku . '-DEFAULT';
+        $counter = 1;
+        
+        // Check if SKU already exists and generate a unique one
+        $skuExists = true;
+        while ($skuExists) {
+            $checkStmt = $db->prepare("SELECT id FROM product_variants WHERE sku = ?");
+            $checkStmt->execute([$variantSku]);
+            
+            if ($checkStmt->fetch()) {
+                // SKU exists, generate a new one
+                $variantSku = $baseSku . '-DEFAULT-' . $counter;
+                $counter++;
+            } else {
+                $skuExists = false;
+            }
+        }
+        
+        // Create default variant with unique SKU
+        $defaultVariant = $db->prepare("
+            INSERT INTO product_variants 
+            (product_id, sku, size, color, price, stock_quantity, is_default)
+            VALUES (?, ?, 'Default', 'Default', ?, 0, 1)
+        ");
+        
+        $defaultVariant->execute([$productId, $variantSku, $productData['price']]);
+    }
+
         }
         
         // Commit transaction
@@ -363,27 +430,28 @@ $content .= '
                     </div>
                 </div>
                 
-                <!-- Pricing Card -->
+               <!-- Pricing Card -->
                 <div class="card shadow mb-4">
                     <div class="card-header py-3">
-                        <h6 class="m-0 font-weight-bold text-primary">Pricing & Inventory</h6>
+                        <h6 class="m-0 font-weight-bold text-primary">Base Pricing</h6>
                     </div>
                     <div class="card-body">
                         <div class="row g-3">
                             <div class="col-md-6">
-                                <label for="price" class="form-label">Price *</label>
+                                <label for="price" class="form-label">Base Price *</label>
                                 <div class="input-group">
                                     <span class="input-group-text">Ksh</span>
                                     <input type="number" 
-                                           class="form-control" 
-                                           id="price" 
-                                           name="price" 
-                                           value="' . htmlspecialchars($formData['price'] ?? '') . '" 
-                                           step="0.01" 
-                                           min="0" 
-                                           required
-                                           placeholder="0.00">
+                                        class="form-control" 
+                                        id="price" 
+                                        name="price" 
+                                        value="' . htmlspecialchars($formData['price'] ?? '') . '" 
+                                        step="0.01" 
+                                        min="0" 
+                                        required
+                                        placeholder="0.00">
                                 </div>
+                                <small class="text-muted">Default price for all variants</small>
                             </div>
                             
                             <div class="col-md-6">
@@ -391,26 +459,19 @@ $content .= '
                                 <div class="input-group">
                                     <span class="input-group-text">Ksh</span>
                                     <input type="number" 
-                                           class="form-control" 
-                                           id="compare_price" 
-                                           name="compare_price" 
-                                           value="' . htmlspecialchars($formData['compare_price'] ?? '') . '" 
-                                           step="0.01" 
-                                           min="0"
-                                           placeholder="Original price for discount display">
+                                        class="form-control" 
+                                        id="compare_price" 
+                                        name="compare_price" 
+                                        value="' . htmlspecialchars($formData['compare_price'] ?? '') . '" 
+                                        step="0.01" 
+                                        min="0"
+                                        placeholder="Original price for discount display">
                                 </div>
                             </div>
-                            
-                            <div class="col-md-6">
-                                <label for="stock_quantity" class="form-label">Stock Quantity</label>
-                                <input type="number" 
-                                       class="form-control" 
-                                       id="stock_quantity" 
-                                       name="stock_quantity" 
-                                       value="' . htmlspecialchars($formData['stock_quantity'] ?? '0') . '" 
-                                       min="0"
-                                       placeholder="0">
-                            </div>
+                        </div>
+                        <div class="alert alert-info mt-3">
+                            <i class="fas fa-info-circle me-2"></i>
+                            <strong>Note:</strong> Stock is managed at the variant level. Add variants below to set specific stock quantities.
                         </div>
                     </div>
                 </div>
@@ -439,20 +500,27 @@ $content .= '
                     </div>
                 </div>
                 
-                <!-- Variants Card -->
+               <!-- Variants Card -->
                 <div class="card shadow mb-4">
                     <div class="card-header py-3 d-flex justify-content-between align-items-center">
-                        <h6 class="m-0 font-weight-bold text-primary">Product Variants (Optional)</h6>
+                        <h6 class="m-0 font-weight-bold text-primary">Product Variants</h6>
                         <button type="button" class="btn btn-sm btn-primary" onclick="addVariant()">
                             <i class="fas fa-plus me-1"></i> Add Variant
                         </button>
                     </div>
                     <div class="card-body">
+                        <div class="alert alert-warning mb-3">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            <strong>Important:</strong> If you don\'t add variants, you MUST add stock quantities to variants after creating the product.
+                            Stock is no longer managed at the product level.
+                        </div>
+                        
                         <div id="variantsContainer">
                             <div class="text-center text-muted py-4" id="noVariantsMessage">
                                 <i class="fas fa-box-open fa-2x mb-2"></i>
-                                <p>No variants added yet. Add size/color options if needed.</p>
-                                <p class="small">If no variants are added, the product will use the main pricing and stock.</p>
+                                <p><strong>No variants added yet.</strong></p>
+                                <p class="small">You can add variants now or after creating the product.</p>
+                                <p class="small text-danger">Remember: Stock must be added at variant level.</p>
                             </div>
                         </div>
                     </div>
@@ -680,7 +748,90 @@ $(document).ready(function() {
         }
     });
 });
-
+// Form validation
+document.getElementById("productForm").addEventListener("submit", function(e) {
+    const name = document.getElementById("name").value.trim();
+    const price = document.getElementById("price").value;
+    const category = document.getElementById("category_id").value;
+    const sku = document.getElementById("sku").value.trim();
+    const description = document.getElementById("description").value.trim();
+    const images = document.getElementById("images").files;
+    
+    // Basic validation
+    if (!name) {
+        e.preventDefault();
+        Swal.fire("Error", "Product name is required", "error");
+        document.getElementById("name").focus();
+        return false;
+    }
+    
+    if (!price || parseFloat(price) <= 0) {
+        e.preventDefault();
+        Swal.fire("Error", "Valid price is required", "error");
+        document.getElementById("price").focus();
+        return false;
+    }
+    
+    if (!category) {
+        e.preventDefault();
+        Swal.fire("Error", "Category is required", "error");
+        document.getElementById("category_id").focus();
+        return false;
+    }
+    
+    if (!sku) {
+        e.preventDefault();
+        Swal.fire("Error", "SKU is required", "error");
+        document.getElementById("sku").focus();
+        return false;
+    }
+    
+    if (!description) {
+        e.preventDefault();
+        Swal.fire("Error", "Description is required", "error");
+        document.getElementById("description").focus();
+        return false;
+    }
+    
+    if (images.length === 0) {
+        e.preventDefault();
+        Swal.fire("Error", "At least one product image is required", "error");
+        document.getElementById("images").focus();
+        return false;
+    }
+    
+    // NEW: Check variant stock
+    const variantStocks = document.querySelectorAll(".variant-stock");
+    const hasVariants = variantStocks.length > 0;
+    
+    if (hasVariants) {
+        let hasStock = false;
+        variantStocks.forEach(input => {
+            if (parseInt(input.value) > 0) {
+                hasStock = true;
+            }
+        });
+        
+        if (!hasStock) {
+            e.preventDefault();
+            Swal.fire({
+                title: "No Stock Warning",
+                text: "All variants have 0 stock. This product will be marked as out of stock.",
+                icon: "warning",
+                showCancelButton: true,
+                confirmButtonText: "Continue Anyway",
+                cancelButtonText: "Add Stock"
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    e.target.submit();
+                }
+            });
+            return false;
+        }
+    }
+    
+    return true;
+});
 // Image preview
 document.getElementById("images").addEventListener("change", function(e) {
     const preview = document.getElementById("imagePreview");
@@ -877,43 +1028,44 @@ if (form) {
             e.preventDefault();
             e.returnValue = "You have unsaved changes. Are you sure you want to leave?";
         }
-    });
+    });                                                     
     
-    // Reset form changed flag on submit
+    // Reset form changed flag on submit                                                             
     form.addEventListener("submit", function() {
-        formChanged = false;
+        formChanged = false;                                   
     });
     
-    // Reset form button
-    form.querySelector("button[type=\'reset\']").addEventListener("click", function() {
-        if (formChanged) {
-            Swal.fire({
-                title: "Reset Form?",
-                text: "This will clear all form data.",
-                icon: "warning",
-                showCancelButton: true,
-                confirmButtonColor: "#d33",
-                cancelButtonColor: "#3085d6",
-                confirmButtonText: "Yes, reset it!"
-            }).then((result) => {
-                if (result.isConfirmed) {
-                    form.reset();
-                    formChanged = false;
-                    document.getElementById("imagePreview").innerHTML = "";
-                    document.getElementById("variantsContainer").innerHTML = `
-                        <div class="text-center text-muted py-4" id="noVariantsMessage">
-                            <i class="fas fa-box-open fa-2x mb-2"></i>
-                            <p>No variants added yet. Add size/color options if needed.</p>
-                            <p class="small">If no variants are added, the product will use the main pricing and stock.</p>
-                        </div>
-                    `;
-                    variantCount = 0;
-                    $(".select2").val(null).trigger("change");
-                }
-            });
-            return false;
-        }
-    });
+   // Reset form button
+form.querySelector("button[type=\'reset\']").addEventListener("click", function() {
+    if (formChanged) {
+        Swal.fire({
+            title: "Reset Form?",                                                      
+            text: "This will clear all form data.",
+            icon: "warning",
+            showCancelButton: true,
+            confirmButtonColor: "#d33",
+            cancelButtonColor: "#3085d6",
+            confirmButtonText: "Yes, reset it!"
+        }).then((result) => {
+            if (result.isConfirmed) {
+                form.reset();
+                formChanged = false;
+                document.getElementById("imagePreview").innerHTML = "";
+                document.getElementById("variantsContainer").innerHTML = `
+                    <div class="text-center text-muted py-4" id="noVariantsMessage">
+                        <i class="fas fa-box-open fa-2x mb-2"></i>
+                        <p><strong>No variants added yet.</strong></p>
+                        <p class="small">You can add variants now or after creating the product.</p>
+                        <p class="small text-danger">Remember: Stock must be added at variant level.</p>
+                    </div>
+                `;
+                variantCount = 0;
+                $(".select2").val(null).trigger("change");
+            }
+        });
+        return false;
+    }
+});
 }
 </script>';
 

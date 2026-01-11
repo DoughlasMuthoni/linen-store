@@ -38,13 +38,14 @@ try {
     $newSku = $product['sku'] . '-COPY-' . date('YmdHis');
     $newSlug = $product['slug'] . '-copy-' . date('YmdHis');
     
-    // Insert duplicated product
+    // Insert duplicated product (NO STOCK_QUANTITY)
     $insertStmt = $db->prepare("
         INSERT INTO products (
             name, slug, description, short_description, price, compare_price,
-            category_id, brand_id, sku, stock_quantity, is_featured, is_active,
-            care_instructions, materials, weight, dimensions, rating, review_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            category_id, brand_id, sku, is_featured, is_active,
+            care_instructions, materials, weight, dimensions, rating, review_count,
+            created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
     ");
     
     $insertStmt->execute([
@@ -57,7 +58,6 @@ try {
         $product['category_id'],
         $product['brand_id'],
         $newSku,
-        $product['stock_quantity'],
         $product['is_featured'],
         $product['is_active'],
         $product['care_instructions'],
@@ -70,37 +70,43 @@ try {
     
     $newProductId = $db->lastInsertId();
     
-    // Duplicate images
-    $imageStmt = $db->prepare("
-        SELECT * FROM product_images WHERE product_id = ?
-    ");
-    $imageStmt->execute([$productId]);
-    $images = $imageStmt->fetchAll();
-    
-    foreach ($images as $image) {
-        // For simplicity, we're reusing the same image URLs
-        // In production, you might want to copy the actual image files
-        $imageInsertStmt = $db->prepare("
-            INSERT INTO product_images (product_id, image_url, is_primary, sort_order)
-            VALUES (?, ?, ?, ?)
-        ");
-        $imageInsertStmt->execute([
-            $newProductId,
-            $image['image_url'],
-            $image['is_primary'],
-            $image['sort_order']
-        ]);
-    }
-    
-    // Duplicate variants
+    // Fetch variants FIRST (we need them for image associations)
     $variantStmt = $db->prepare("
         SELECT * FROM product_variants WHERE product_id = ?
     ");
     $variantStmt->execute([$productId]);
     $variants = $variantStmt->fetchAll();
     
+    // Duplicate variants with unique SKUs
+    $variantMap = []; // Map old variant IDs to new ones
+    
     foreach ($variants as $variant) {
-        $newVariantSku = $newSku . '-' . substr(uniqid(), -6);
+        // Generate base variant SKU
+        $baseVariantSku = $newSku;
+        if ($variant['size']) $baseVariantSku .= '-' . $variant['size'];
+        if ($variant['color']) $baseVariantSku .= '-' . strtoupper(str_replace(' ', '-', $variant['color']));
+        if (!$variant['size'] && !$variant['color']) {
+            $baseVariantSku .= '-DEFAULT';
+        }
+        
+        // Ensure unique SKU
+        $newVariantSku = $baseVariantSku;
+        $counter = 1;
+        $skuExists = true;
+        
+        while ($skuExists) {
+            $checkStmt = $db->prepare("SELECT id FROM product_variants WHERE sku = ?");
+            $checkStmt->execute([$newVariantSku]);
+            
+            if ($checkStmt->fetch()) {
+                // SKU exists, append counter
+                $newVariantSku = $baseVariantSku . '-' . $counter;
+                $counter++;
+            } else {
+                $skuExists = false;
+            }
+        }
+        
         $variantInsertStmt = $db->prepare("
             INSERT INTO product_variants (
                 product_id, sku, size, color, color_code, price, 
@@ -118,18 +124,47 @@ try {
             $variant['stock_quantity'],
             $variant['is_default']
         ]);
+        
+        $newVariantId = $db->lastInsertId();
+        $variantMap[$variant['id']] = $newVariantId;
+    }
+    
+    // Duplicate images with variant associations
+    $imageStmt = $db->prepare("
+        SELECT * FROM product_images WHERE product_id = ?
+    ");
+    $imageStmt->execute([$productId]);
+    $images = $imageStmt->fetchAll();
+    
+    foreach ($images as $image) {
+        $newVariantId = null;
+        if ($image['variant_id'] && isset($variantMap[$image['variant_id']])) {
+            $newVariantId = $variantMap[$image['variant_id']];
+        }
+        
+        $imageInsertStmt = $db->prepare("
+            INSERT INTO product_images (product_id, variant_id, image_url, is_primary, sort_order)
+            VALUES (?, ?, ?, ?, ?)
+        ");
+        $imageInsertStmt->execute([
+            $newProductId,
+            $newVariantId,
+            $image['image_url'],
+            $image['is_primary'],
+            $image['sort_order']
+        ]);
     }
     
     $db->commit();
     
-    $_SESSION['flash_message'] = 'Product duplicated successfully!';
-    $app->redirect('admin/products/edit/' . $newProductId);
+    $app->setFlashMessage('success', 'Product duplicated successfully!');
+    $app->redirect('admin/product-edit.php?id=' . $newProductId);
     
 } catch (Exception $e) {
     if ($db->inTransaction()) {
         $db->rollBack();
     }
-    $_SESSION['flash_message'] = 'Error: ' . $e->getMessage();
+    $app->setFlashMessage('error', 'Error: ' . $e->getMessage());
     $app->redirect('admin/products');
 }
 ?>

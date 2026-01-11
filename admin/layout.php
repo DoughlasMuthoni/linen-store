@@ -133,7 +133,12 @@ function adminLayout($content, $pageTitle = 'Dashboard') {
                         <span>Categories</span>
                     </a>
                 </li>
-                
+                <li class="nav-item mb-2">
+                    <a class="nav-link text-white d-flex align-items-center" href="<?php echo SITE_URL; ?>admin/brands">
+                        <i class="fas fa-tag fa-fw me-2"></i>
+                        Brands
+                    </a>
+                </li>
                 <!-- Sales & Customers -->
                 <li class="nav-item mb-2">
                     <a class="nav-link text-white d-flex align-items-center <?php echo in_array($currentPage, ['orders.php', 'order-view.php']) ? 'active' : ''; ?>" 
@@ -573,41 +578,83 @@ setInterval(updateTime, 60000);
     <!-- Admin Custom JS (depends on jQuery) -->
     <script src="<?php echo SITE_URL; ?>assets/js/admin.js"></script>
         
-        <!-- Page-specific scripts -->
-        <script>
-        $(document).ready(function() {
-            // Initialize DataTables
-            $('.data-table').DataTable({
-                pageLength: 25,
-                responsive: true
-            });
+       <!-- Page-specific scripts -->
+    <script>
+    $(document).ready(function() {
+        // Initialize DataTables ONLY on tables with actual data
+        $('.data-table').each(function() {
+            var $table = $(this);
+            var $tableId = $table.attr('id');
             
-            // Initialize Select2
-            $('.select2').select2({
-                theme: 'bootstrap-5'
-            });
+            // Check if this is the reports table (skip it - handled in reports.php)
+            if ($tableId === 'reportTable') {
+                console.log('Skipping DataTables for reportTable - handled in reports.php');
+                return; // Skip this table
+            }
             
-            // Confirm before delete
-            $('.confirm-delete').on('click', function(e) {
-                e.preventDefault();
-                var url = $(this).attr('href');
+            // For other tables, check if they have data
+            var hasDataRows = false;
+            $table.find('tbody tr').each(function() {
+                var $row = $(this);
+                var $cells = $row.find('td');
                 
-                Swal.fire({
-                    title: 'Are you sure?',
-                    text: "This action cannot be undone!",
-                    icon: 'warning',
-                    showCancelButton: true,
-                    confirmButtonColor: '#d33',
-                    cancelButtonColor: '#3085d6',
-                    confirmButtonText: 'Yes, delete it!'
-                }).then((result) => {
-                    if (result.isConfirmed) {
-                        window.location.href = url;
+                // Check if this row has actual data (not a colspan "no data" row)
+                if ($cells.length > 0) {
+                    var hasColspan = false;
+                    $cells.each(function() {
+                        if ($(this).attr('colspan')) {
+                            hasColspan = true;
+                            return false;
+                        }
+                    });
+                    
+                    if (!hasColspan) {
+                        hasDataRows = true;
+                        return false; // Break loop
+                    }
+                }
+            });
+            
+            if (hasDataRows) {
+                $table.DataTable({
+                    pageLength: 25,
+                    responsive: true,
+                    language: {
+                        infoEmpty: "No data available in table"
                     }
                 });
+            } else {
+                // Just add basic styling to empty tables
+                $table.addClass('table-striped');
+            }
+        });
+        
+        // Initialize Select2
+        $('.select2').select2({
+            theme: 'bootstrap-5'
+        });
+        
+        // Confirm before delete
+        $('.confirm-delete').on('click', function(e) {
+            e.preventDefault();
+            var url = $(this).attr('href');
+            
+            Swal.fire({
+                title: 'Are you sure?',
+                text: "This action cannot be undone!",
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#d33',
+                cancelButtonColor: '#3085d6',
+                confirmButtonText: 'Yes, delete it!'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    window.location.href = url;
+                }
             });
         });
-        </script>
+    });
+    </script>
     </body>
     </html>
     <?php

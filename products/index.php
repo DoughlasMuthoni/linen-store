@@ -455,12 +455,28 @@ function renderStars($rating) {
                                                    <?php echo ($filters['brand_id'] == $brand['id']) ? 'checked' : ''; ?>>
                                             <label class="form-check-label d-flex align-items-center w-100" 
                                                    for="brand-<?php echo $brand['id']; ?>">
-                                                <?php if ($brand['logo_url']): ?>
-                                                    <img src="<?php echo SITE_URL . $brand['logo_url']; ?>" 
-                                                         alt="<?php echo htmlspecialchars($brand['name']); ?>"
-                                                         class="me-3 rounded" 
-                                                         style="width: 30px; height: 30px; object-fit: contain;">
-                                                <?php endif; ?>
+                                                <?php 
+// First check logo_url, then logo, then use placeholder
+$brandLogo = null;
+if (!empty($brand['logo_url'])) {
+    // If logo_url is a full URL, use it directly
+    if (strpos($brand['logo_url'], 'http') === 0) {
+        $brandLogo = $brand['logo_url'];
+    } else {
+        $brandLogo = SITE_URL . ltrim($brand['logo_url'], '/');
+    }
+} elseif (!empty($brand['logo'])) {
+    // Use logo field with SITE_URL
+    $brandLogo = SITE_URL . ltrim($brand['logo'], '/');
+}
+
+if ($brandLogo): ?>
+    <img src="<?php echo $brandLogo; ?>" 
+         alt="<?php echo htmlspecialchars($brand['name']); ?>"
+         class="me-3 rounded" 
+         style="width: 30px; height: 30px; object-fit: contain;"
+         onerror="this.onerror=null; this.src='<?php echo SITE_URL; ?>assets/images/placeholder.jpg';">
+<?php endif; ?>
                                                 <span class="fw-medium"><?php echo htmlspecialchars($brand['name']); ?></span>
                                             </label>
                                         </div>

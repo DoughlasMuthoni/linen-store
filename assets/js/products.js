@@ -330,55 +330,40 @@ class ProductCatalog {
         window.location.href = `${window.SITE_URL || ''}products/${productId}`;
     }
     
-    async addToCart(productId, quantity) {
-        try {
-            const response = await fetch(`${window.SITE_URL || ''}ajax/add-to-cart.php`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    product_id: productId,
-                    quantity: quantity
-                })
-            });
+//     async function addToCart(productId, quantity) {
+//     try {
+//         const response = await fetch('<?php echo SITE_URL; ?>ajax/add-to-cart.php', {
+//             method: 'POST',
+//             headers: {
+//                 'Content-Type': 'application/json',
+//             },
+//             body: JSON.stringify({
+//                 product_id: productId,
+//                 quantity: quantity
+//             })
+//         });
+        
+//         const data = await response.json();
+        
+//         if (data.success) {
+//             // Update cart count in UI
+//             document.querySelectorAll('.cart-count').forEach(el => {
+//                 el.textContent = data.cart_count;
+//                 el.style.display = data.cart_count > 0 ? 'inline-block' : 'none';
+//             });
             
-            const data = await response.json();
-            
-            if (data.success) {
-                // Show success message
-                Swal.fire({
-                    icon: 'success',
-                    title: 'Added to Cart!',
-                    text: 'Product has been added to your shopping cart.',
-                    showConfirmButton: false,
-                    timer: 1500,
-                    toast: true,
-                    position: 'bottom-end'
-                });
-                
-                // Update cart count in header
-                this.updateCartCount(data.cart_count || 0);
-            } else {
-                Swal.fire({
-                    icon: 'error',
-                    title: 'Error!',
-                    text: data.message || 'Failed to add product to cart',
-                    toast: true,
-                    position: 'bottom-end'
-                });
-            }
-        } catch (error) {
-            console.error('Error adding to cart:', error);
-            Swal.fire({
-                icon: 'error',
-                title: 'Error!',
-                text: 'Something went wrong. Please try again.',
-                toast: true,
-                position: 'bottom-end'
-            });
-        }
-    }
+//             showToast('Added to cart!', 'success');
+//             return true;
+//         } else {
+//             showToast(data.message || 'Failed to add to cart', 'error');
+//             return false;
+//         }
+//     } catch (error) {
+//         console.error('Add to cart error:', error);
+//         showToast('Network error. Please try again.', 'error');
+//         return false;
+//     }
+// }
     
     updateCartCount(count) {
         const cartCountElements = document.querySelectorAll('.cart-count');

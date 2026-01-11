@@ -1,100 +1,98 @@
 // /linen-closet/assets/js/main.js
 
+// Get base URL dynamically (move outside DOMContentLoaded so it's available globally)
+const baseUrl = (function() {
+    if (window.location.hostname === 'shop.waterliftsolar.africa') {
+        return window.location.origin + '/';
+    }
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        return window.location.origin + '/linen-closet/';
+    }
+    return window.location.origin + '/';
+})();
+
+console.log('Base URL:', baseUrl);
+
+// Global function to handle add to cart - FIXED VERSION
+window.addToCart = function(productId, quantity = 1, options = {}, event = null) {
+    console.log('Adding product:', productId, quantity, options);
+    
+    // Find the button that was clicked
+    const addButton = event?.target || document.querySelector(`[data-product-id="${productId}"]`);
+    const originalText = addButton?.innerHTML;
+    
+    // Show loading state
+    if (addButton) {
+        addButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        addButton.disabled = true;
+    }
+    
+    // Prepare data
+    const data = {
+        product_id: productId,
+        quantity: quantity
+    };
+    
+    // Add options if provided
+    if (options.size) data.size = options.size;
+    if (options.color) data.color = options.color;
+    if (options.material) data.material = options.material;
+    if (options.variant_id) data.variant_id = options.variant_id;
+    
+    // Send to server
+    fetch(baseUrl + 'ajax/add-to-cart.php', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => {
+        if (!response.ok) throw new Error('Network response was not ok');
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            // UPDATE THE CART COUNT EVERYWHERE
+            const newCount = data.cart_count || data.cart?.count || 0;
+            
+            // Update cart count (this includes mobile badge)
+            updateCartCount(newCount);
+            
+            // Show success message
+            showSuccessToast('Added to cart!');
+            
+            // Dispatch custom event for other listeners
+            window.dispatchEvent(new CustomEvent('cartUpdated', { 
+                detail: { count: newCount }
+            }));
+            
+            // Also call the mobile badge function directly for safety
+            const mobileBadge = document.querySelector('.mobile-cart-badge');
+            if (mobileBadge) {
+                mobileBadge.textContent = newCount;
+                mobileBadge.style.display = newCount > 0 ? 'flex' : 'none';
+            }
+            
+        } else {
+            showErrorToast(data.message || 'Failed to add to cart');
+        }
+    })
+    .catch(error => {
+        console.error('Add to cart error:', error);
+        showErrorToast('Network error. Please try again.');
+    })
+    .finally(() => {
+        // Restore button
+        if (addButton && originalText) {
+            addButton.innerHTML = originalText;
+            addButton.disabled = false;
+        }
+    });
+};
+
 document.addEventListener('DOMContentLoaded', function() {
-    // Set base URL for API calls
-    const baseUrl = window.location.origin + '/linen-closet/';
-    console.log('Base URL:', baseUrl);
-    
-    // Cart functions
-    // window.addToCart = function(productId, quantity = 1, size = null, color = null, material = null) {
-    //     console.log('Adding to cart:', { productId, quantity, size, color, material });
-        
-    //     fetch(baseUrl + 'ajax/add-to-cart.php', {
-    //         method: 'POST',
-    //         headers: {
-    //             'Content-Type': 'application/json',
-    //             'X-Requested-With': 'XMLHttpRequest'
-    //         },
-    //         body: JSON.stringify({
-    //             product_id: productId,
-    //             quantity: quantity,
-    //             size: size,
-    //             color: color,
-    //             material: material
-    //         })
-    //     })
-    //     .then(response => {
-    //         console.log('Cart response status:', response.status);
-            
-    //         // Check content type
-    //         const contentType = response.headers.get('content-type');
-    //         if (!contentType || !contentType.includes('application/json')) {
-    //             return response.text().then(text => {
-    //                 console.error('Server returned non-JSON:', text.substring(0, 500));
-    //                 throw new Error('Server returned HTML instead of JSON');
-    //             });
-    //         }
-    //         return response.json();
-    //     })
-    //     .then(data => {
-    //         console.log('Cart response data:', data);
-    //         if(data.success) {
-    //             updateCartCount(data.cart_count || data.cartCount || 0);
-                
-    //             // Show success message
-    //             const toast = new bootstrap.Toast(document.getElementById('cartToast'));
-    //             document.getElementById('toastMessage').textContent = data.message || 'Added to cart!';
-    //             toast.show();
-                
-    //             // Optional: Show SweetAlert
-    //             if (typeof Swal !== 'undefined') {
-    //                 Swal.fire({
-    //                     icon: 'success',
-    //                     title: 'Success!',
-    //                     text: data.message || 'Product added to cart',
-    //                     showConfirmButton: false,
-    //                     timer: 1500
-    //                 });
-    //             }
-    //         } else {
-    //             throw new Error(data.message || 'Failed to add to cart');
-    //         }
-    //     })
-    //     .catch(error => {
-    //         console.error('Add to cart error:', error);
-            
-    //         // Show error message
-    //         if (typeof Swal !== 'undefined') {
-    //             Swal.fire({
-    //                 icon: 'error',
-    //                 title: 'Error',
-    //                 text: error.message || 'Failed to add product to cart',
-    //                 confirmButtonText: 'OK'
-    //             });
-    //         } else {
-    //             alert('Error: ' + error.message);
-    //         }
-    //     });
-    // };
-    
-    // Quick add to cart (for product cards)
-    // window.quickAddToCart = function(button) {
-    //     const productId = button.dataset.productId;
-    //     const productName = button.dataset.productName || 'Product';
-        
-    //     // Show loading
-    //     const originalText = button.innerHTML;
-    //     button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-    //     button.disabled = true;
-        
-    //     window.addToCart(productId, 1);
-        
-    //     // Restore button after 2 seconds
-    //     setTimeout(() => {
-    //         button.innerHTML = originalText;
-    //         button.disabled = false;
-    //     }, 2000);
-    // };
     
     // Remove from cart
     window.removeFromCart = function(productId, key = null) {
@@ -197,99 +195,129 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    // Toast notification functions
+    function showSuccessToast(message) {
+        showToast(message, 'success');
+    }
 
-// Add to wishlist functionality (server-side)
-// document.addEventListener('click', function(e) {
-//     const wishlistBtn = e.target.closest('.add-to-wishlist');
-//     if (wishlistBtn) {
-//         e.preventDefault();
-//         const productId = wishlistBtn.dataset.productId;
-        
-//         // Show loading state
-//         const originalHTML = wishlistBtn.innerHTML;
-//         wishlistBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-        
-//         // Make AJAX call
-//         fetch(baseUrl + 'ajax/toggle-wishlist.php', {
-//             method: 'POST',
-//             headers: {
-//                 'Content-Type': 'application/json',
-//                 'X-Requested-With': 'XMLHttpRequest'
-//             },
-//             body: JSON.stringify({
-//                 product_id: productId,
-//                 action: 'toggle'
-//             })
-//         })
-//         .then(response => response.json())
-//         .then(data => {
-//             if (data.success) {
-//                 // Update button appearance
-//                 if (data.action === 'added') {
-//                     wishlistBtn.innerHTML = '<i class="fas fa-heart text-danger"></i>';
-//                     wishlistBtn.title = 'Remove from Wishlist';
-//                     wishlistBtn.classList.add('in-wishlist');
-//                     showToast('Added to wishlist!', 'success');
-//                 } else {
-//                     wishlistBtn.innerHTML = '<i class="far fa-heart"></i>';
-//                     wishlistBtn.title = 'Add to Wishlist Kasee';
-//                     wishlistBtn.classList.remove('in-wishlist');
-//                     showToast('Removed from wishlist', 'info');
-//                 }
-                
-//                 // Update wishlist count if provided
-//                 if (data.wishlist_count !== undefined) {
-//                     updateWishlistCount(data.wishlist_count);
-//                 }
-//             } else {
-//                 // Restore original button state
-//                 wishlistBtn.innerHTML = originalHTML;
-//                 showToast(data.message || 'Failed to update wishlist', 'error');
-//             }
-//         })
-//         .catch(error => {
-//             console.error('Wishlist error:', error);
-//             wishlistBtn.innerHTML = originalHTML;
-//             showToast('Something went wrong', 'error');
-//         });
-//     }
-// });
+    function showErrorToast(message) {
+        showToast(message, 'danger');
+    }
 
+    function showToast(message, type = 'success') {
+        // Create toast container if it doesn't exist
+        let toastContainer = document.getElementById('globalToastContainer');
+        if (!toastContainer) {
+            toastContainer = document.createElement('div');
+            toastContainer.id = 'globalToastContainer';
+            toastContainer.className = 'toast-container position-fixed top-0 end-0 p-3';
+            document.body.appendChild(toastContainer);
+        }
+        
+        // Create toast
+        const toastId = 'toast-' + Date.now();
+        const toastHTML = `
+            <div id="${toastId}" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+                <div class="toast-header bg-${type} text-white">
+                    <strong class="me-auto">
+                        <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i>
+                        ${type === 'success' ? 'Success' : 'Error'}
+                    </strong>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast"></button>
+                </div>
+                <div class="toast-body">
+                    ${message}
+                </div>
+            </div>
+        `;
+        
+        toastContainer.insertAdjacentHTML('beforeend', toastHTML);
+        
+        // Show the toast
+        const toastEl = document.getElementById(toastId);
+        const toast = new bootstrap.Toast(toastEl, { delay: 3000 });
+        toast.show();
+        
+        // Remove after hide
+        toastEl.addEventListener('hidden.bs.toast', function() {
+            toastEl.remove();
+        });
+    }
+    
     // Update cart count in UI
     function updateCartCount(count) {
+        console.log('Updating cart count to:', count);
+        
+        // Update desktop badges
         const cartBadges = document.querySelectorAll('.cart-count, .cart-badge, .badge[data-cart-count]');
         cartBadges.forEach(badge => {
             badge.textContent = count;
             badge.classList.toggle('d-none', count === 0);
         });
         
+        // UPDATE MOBILE BADGE
+        updateMobileCartBadge(count);
+        
         // Update cart icon animation
-        const cartIcons = document.querySelectorAll('.cart-icon, .fa-shopping-cart');
+        const cartIcons = document.querySelectorAll('.cart-icon, .fa-shopping-cart, .fa-shopping-bag');
         cartIcons.forEach(icon => {
             icon.classList.add('animate__animated', 'animate__bounce');
             setTimeout(() => {
                 icon.classList.remove('animate__animated', 'animate__bounce');
             }, 1000);
         });
+        
+        // Store in sessionStorage
+        sessionStorage.setItem('cartCount', count);
+    }
+    
+    // Update mobile cart badge specifically
+    function updateMobileCartBadge(count) {
+        console.log('Updating mobile badge to:', count);
+        
+        // Method 1: By ID (if you added id="mobileCartBadge")
+        const mobileBadgeById = document.getElementById('mobileCartBadge');
+        if (mobileBadgeById) {
+            mobileBadgeById.textContent = count;
+            mobileBadgeById.style.display = count > 0 ? 'flex' : 'none';
+        }
+        
+        // Method 2: By class (backup)
+        const mobileBadgeByClass = document.querySelector('.mobile-cart-badge');
+        if (mobileBadgeByClass && !mobileBadgeById) {
+            mobileBadgeByClass.textContent = count;
+            mobileBadgeByClass.style.display = count > 0 ? 'flex' : 'none';
+        }
     }
     
     // Initialize cart count on page load
     function initializeCartCount() {
+        // First check sessionStorage for faster display
+        const storedCount = sessionStorage.getItem('cartCount');
+        if (storedCount !== null) {
+            updateCartCount(parseInt(storedCount));
+        }
+        
+        // Then fetch from server for accuracy
         fetch(baseUrl + 'ajax/get-cart-count.php')
             .then(response => {
-                if (!response.ok) return { count: 0 };
+                if (!response.ok) {
+                    console.warn('Cart count API failed, using stored value');
+                    return;
+                }
                 return response.json();
             })
             .then(data => {
-                if(data.count !== undefined) {
-                    updateCartCount(data.count);
-                } else {
-                    updateCartCount(0);
+                if (data && data.count !== undefined) {
+                    const serverCount = parseInt(data.count);
+                    // Only update if different from stored
+                    if (serverCount !== parseInt(storedCount || 0)) {
+                        updateCartCount(serverCount);
+                    }
                 }
             })
             .catch(error => {
                 console.error('Failed to load cart count:', error);
-                updateCartCount(0);
             });
     }
     
@@ -333,8 +361,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    
-    
     // Image lazy loading
     if ('IntersectionObserver' in window) {
         const imageObserver = new IntersectionObserver((entries, observer) => {
@@ -358,7 +384,19 @@ document.addEventListener('DOMContentLoaded', function() {
     window.updateCartCount = updateCartCount;
     window.updateCartTotals = updateCartTotals;
     
-    // console.log('Main.js initialized successfully');
+    // Add event delegation for add-to-cart buttons
+    document.addEventListener('click', function(e) {
+        const addBtn = e.target.closest('[onclick*="addToCart"], .btn-add-to-cart');
+        if (addBtn && addBtn.onclick && addBtn.onclick.toString().includes('addToCart')) {
+            // Let the onclick handler run, but ensure it passes the event
+            return;
+        }
+    });
+    
+    // Poll for cart updates every 5 seconds (optional, for multi-tab support)
+    setInterval(initializeCartCount, 5000);
+    
+    console.log('Main.js initialized successfully');
 });
 
 // Toast container HTML (add this to your main layout if not exists)
@@ -382,4 +420,4 @@ function ensureToastContainer() {
 }
 
 // Call this on page load
-ensureToastContainer();
+document.addEventListener('DOMContentLoaded', ensureToastContainer);

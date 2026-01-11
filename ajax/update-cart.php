@@ -107,24 +107,67 @@ try {
                 exit;
             }
         } else {
-            // Check product stock
-            $stmt = $db->prepare("SELECT stock_quantity FROM products WHERE id = ? AND is_active = 1");
-            $stmt->execute([$productId]);
-            $product = $stmt->fetch(PDO::FETCH_ASSOC);
+        // Check product stock from variants (when no specific variant selected)
+        $stmt = $db->prepare("
+            SELECT 
+                p.id,
+                p.name,
+                COALESCE(SUM(pv.stock_quantity), 0) as total_stock
+            FROM products p
+            LEFT JOIN product_variants pv ON p.id = pv.product_id
+            WHERE p.id = ? AND p.is_active = 1
+            GROUP BY p.id
+        ");
+        $stmt->execute([$productId]);
+        $product = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if (!$product) {
+            throw new Exception('Product not found or inactive');
+        }
+        
+        // Check if product has variants
+        $stmt2 = $db->prepare("SELECT COUNT(*) as variant_count FROM product_variants WHERE product_id = ?");
+        $stmt2->execute([$productId]);
+        $variantCount = $stmt2->fetchColumn();
+        
+        if ($variantCount > 0) {
+            // Product has variants - check if there's any available stock
+            $availableStock = $product['total_stock'];
             
-            if (!$product) {
-                throw new Exception('Product not found or inactive');
-            }
-            
-            if ($quantity > $product['stock_quantity']) {
+            if ($availableStock <= 0) {
                 echo json_encode([
                     'success' => false,
-                    'message' => 'Only ' . $product['stock_quantity'] . ' items available',
-                    'max_quantity' => $product['stock_quantity']
+                    'message' => 'This product is out of stock',
+                    'max_quantity' => 0
+                ]);
+                exit;
+            }
+            
+            // For products with variants but no specific variant selected,
+            // we can't validate exact quantity, but we can check if product has any stock
+            if ($quantity > $availableStock) {
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'Only ' . $availableStock . ' items available across all variants',
+                    'max_quantity' => $availableStock
+                ]);
+                exit;
+            }
+        } else {
+            // Product has no variants - use main product logic (if you still have stock field)
+            // Since you removed stock_quantity, you might need to adjust this logic
+            $availableStock = $product['total_stock'];
+            
+            if ($quantity > $availableStock) {
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'Only ' . $availableStock . ' items available',
+                    'max_quantity' => $availableStock
                 ]);
                 exit;
             }
         }
+    }
         
         // Update quantity
         $_SESSION['cart'][$cartKey]['quantity'] = $quantity;
@@ -158,8 +201,17 @@ try {
             throw new Exception('Product not in cart');
         }
         
-        // Check product stock
-        $stmt = $db->prepare("SELECT stock_quantity FROM products WHERE id = ? AND is_active = 1");
+        // Check product stock from variants
+        $stmt = $db->prepare("
+            SELECT 
+                p.id,
+                p.name,
+                COALESCE(SUM(pv.stock_quantity), 0) as total_stock
+            FROM products p
+            LEFT JOIN product_variants pv ON p.id = pv.product_id
+            WHERE p.id = ? AND p.is_active = 1
+            GROUP BY p.id
+        ");
         $stmt->execute([$productId]);
         $product = $stmt->fetch(PDO::FETCH_ASSOC);
         
@@ -167,11 +219,13 @@ try {
             throw new Exception('Product not found or inactive');
         }
         
-        if ($quantity > $product['stock_quantity']) {
+        $availableStock = $product['total_stock'];
+        
+        if ($quantity > $availableStock) {
             echo json_encode([
                 'success' => false,
-                'message' => 'Only ' . $product['stock_quantity'] . ' items available',
-                'max_quantity' => $product['stock_quantity']
+                'message' => 'Only ' . $availableStock . ' items available',
+                'max_quantity' => $availableStock
             ]);
             exit;
         }

@@ -137,23 +137,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Convert numeric values
         $productData['price'] = floatval($productData['price']);
         $productData['compare_price'] = !empty($productData['compare_price']) ? floatval($productData['compare_price']) : null;
-        $productData['stock_quantity'] = intval($productData['stock_quantity']);
         $productData['weight'] = !empty($productData['weight']) ? floatval($productData['weight']) : null;
         
         // Start transaction
         $db->beginTransaction();
         
         // Update product
+        
         $updateStmt = $db->prepare("
             UPDATE products SET
                 name = ?, slug = ?, description = ?, short_description = ?, 
                 price = ?, compare_price = ?, category_id = ?, brand_id = ?,
-                sku = ?, stock_quantity = ?, is_featured = ?, is_active = ?,
+                sku = ?, is_featured = ?, is_active = ?, 
                 care_instructions = ?, materials = ?, weight = ?, dimensions = ?,
                 updated_at = NOW()
             WHERE id = ?
         ");
-        
+
         $updateStmt->execute([
             $productData['name'],
             $productData['slug'],
@@ -164,7 +164,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $productData['category_id'],
             $productData['brand_id'],
             $productData['sku'],
-            $productData['stock_quantity'],
             $productData['is_featured'],
             $productData['is_active'],
             $productData['care_instructions'],
@@ -194,7 +193,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!empty($variant['size']) || !empty($variant['color'])) {
                     $variantSku = !empty($variant['sku']) ? $variant['sku'] : $productData['sku'] . '-' . substr(uniqid(), -6);
                     $variantPrice = !empty($variant['price']) ? floatval($variant['price']) : $productData['price'];
-                    $stockQuantity = intval($variant['stock_quantity'] ?? $productData['stock_quantity']);
+                    $stockQuantity = intval($variant['stock_quantity'] ?? 0); // Always start with 0 if not specified
                     $isDefault = isset($variant['is_default']) && $variant['is_default'] == '1' ? 1 : 0;
                     
                     // Ensure only one default variant
@@ -497,26 +496,28 @@ $content .= '
                     </div>
                 </div>
                 
-                <!-- Pricing Card -->
+               <!-- Pricing Card -->
                 <div class="card shadow mb-4">
                     <div class="card-header py-3">
-                        <h6 class="m-0 font-weight-bold text-primary">Pricing</h6>
+                        <h6 class="m-0 font-weight-bold text-primary">Base Pricing</h6>
+                        <small class="text-muted">Default price used when variant prices are not set</small>
                     </div>
                     <div class="card-body">
                         <div class="row g-3">
                             <div class="col-md-6">
-                                <label for="price" class="form-label">Price *</label>
+                                <label for="price" class="form-label">Base Price *</label>
                                 <div class="input-group">
                                     <span class="input-group-text">Ksh</span>
                                     <input type="number" 
-                                           class="form-control" 
-                                           id="price" 
-                                           name="price" 
-                                           value="' . htmlspecialchars($product['price'] ?? '0.00') . '" 
-                                           step="0.01" 
-                                           min="0" 
-                                           required>
+                                        class="form-control" 
+                                        id="price" 
+                                        name="price" 
+                                        value="' . htmlspecialchars($product['price'] ?? '0.00') . '" 
+                                        step="0.01" 
+                                        min="0" 
+                                        required>
                                 </div>
+                                <small class="text-muted">Default price for all variants</small>
                             </div>
                             
                             <div class="col-md-6">
@@ -524,24 +525,19 @@ $content .= '
                                 <div class="input-group">
                                     <span class="input-group-text">Ksh</span>
                                     <input type="number" 
-                                           class="form-control" 
-                                           id="compare_price" 
-                                           name="compare_price" 
-                                           value="' . htmlspecialchars($product['compare_price'] ?? '') . '" 
-                                           step="0.01" 
-                                           min="0">
+                                        class="form-control" 
+                                        id="compare_price" 
+                                        name="compare_price" 
+                                        value="' . htmlspecialchars($product['compare_price'] ?? '') . '" 
+                                        step="0.01" 
+                                        min="0">
                                 </div>
+                                <small class="text-muted">Optional discount comparison</small>
                             </div>
-                            
-                            <div class="col-md-6">
-                                <label for="stock_quantity" class="form-label">Stock Quantity</label>
-                                <input type="number" 
-                                       class="form-control" 
-                                       id="stock_quantity" 
-                                       name="stock_quantity" 
-                                       value="' . htmlspecialchars($product['stock_quantity'] ?? '0') . '" 
-                                       min="0">
-                            </div>
+                        </div>
+                        <div class="alert alert-info mt-3">
+                            <i class="fas fa-info-circle me-2"></i>
+                            <strong>Note:</strong> Stock is managed at the variant level below. Variants can have different prices and stock quantities.
                         </div>
                     </div>
                 </div>
@@ -916,8 +912,22 @@ $content .= '
                             <small class="text-muted d-block">Variants</small>
                             <div>' . count($variants) . ' variants</div>
                         </div>
+                        
+                        <!-- ADD THIS: Total Stock from Variants -->
+                        <div class="mb-2">
+                            <small class="text-muted d-block">Total Stock</small>
+                            <div>';
+                $totalVariantStock = 0;
+                foreach ($variants as $variant) {
+                    $totalVariantStock += $variant['stock_quantity'];
+                }
+                $content .= $totalVariantStock . ' units';
+                $content .= '
+                            </div>
+                        </div>
                     </div>
                 </div>
+                
                 
                 <!-- Actions Card -->
                 <div class="card shadow">
@@ -927,19 +937,24 @@ $content .= '
                         </button>
                         
                         <div class="d-grid gap-2">
+                            <a href="' . SITE_URL . 'admin/product-variants.php?product_id=' . $productId . '" 
+                            class="btn btn-outline-secondary">
+                                <i class="fas fa-layer-group me-2"></i> Manage Variants
+                            </a>
+                            
                             <a href="' . SITE_URL . 'products/' . $product['slug'] . '" 
-                               class="btn btn-outline-primary" 
-                               target="_blank">
+                            class="btn btn-outline-primary" 
+                            target="_blank">
                                 <i class="fas fa-eye me-2"></i> View Product
                             </a>
                             
                             <a href="' . SITE_URL . 'admin/products/duplicate/' . $product['id'] . '" 
-                               class="btn btn-outline-info">
+                            class="btn btn-outline-info">
                                 <i class="fas fa-copy me-2"></i> Duplicate Product
                             </a>
                             
                             <a href="' . SITE_URL . 'admin/products/delete/' . $product['id'] . '" 
-                               class="btn btn-outline-danger confirm-delete">
+                            class="btn btn-outline-danger confirm-delete">
                                 <i class="fas fa-trash me-2"></i> Delete Product
                             </a>
                         </div>
@@ -1300,7 +1315,7 @@ document.addEventListener("input", function(e) {
         if (baseSku && baseSku.value && (size || color)) {
             let sku = baseSku.value;
             if (size) sku += "-" + size;
-            if (color) sku += "-" + color.replace(/\\s+/g, "-").toUpperCase();
+            if (color) sku += "-" + color.replace(/\s+/g, "-").toUpperCase();
             const skuInput = variantItem.querySelector(".variant-sku");
             if (!skuInput.value || skuInput.value.startsWith(baseSku.value)) {
                 skuInput.value = sku;
@@ -1358,6 +1373,35 @@ document.querySelectorAll(".confirm-delete").forEach(function(link) {
             }
         });
     });
+});
+// Add form validation
+document.getElementById(\'productForm\').addEventListener(\'submit\', function(e) {
+    // Check if any variant has stock
+    const variantStocks = document.querySelectorAll(\'.variant-stock\');
+    let hasStock = false;
+    
+    variantStocks.forEach(input => {
+        if (parseInt(input.value) > 0) {
+            hasStock = true;
+        }
+    });
+    
+    // If no variants or all have 0 stock, show warning
+    if (variantStocks.length > 0 && !hasStock) {
+        e.preventDefault();
+        Swal.fire({
+            title: \'No Stock Warning\',
+            text: \'All variants have 0 stock. This product will be marked as out of stock.\',
+            icon: \'warning\',
+            showCancelButton: true,
+            confirmButtonText: \'Continue Anyway\',
+            cancelButtonText: \'Cancel\'
+        }).then((result) => {
+            if (result.isConfirmed) {
+                e.target.submit();
+            }
+        });
+    }
 });
 </script>';
 

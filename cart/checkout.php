@@ -73,8 +73,11 @@ $stmt = $db->prepare("
         p.id,
         p.name,
         p.price,
-        p.stock_quantity,
-        p.min_stock_level,  -- CRITICAL: Add this
+        COALESCE(
+            (SELECT SUM(stock_quantity) FROM product_variants pv WHERE pv.product_id = p.id),
+            0
+        ) as total_variant_stock,
+        10 as min_stock_level,  -- Use a default value or remove if not needed
         p.sku,
         p.is_active,
         (SELECT image_url FROM product_images pi WHERE pi.product_id = p.id AND pi.is_primary = 1 LIMIT 1) as primary_image
@@ -440,20 +443,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ]);
                     $itemsInserted++;
                     
-                    // Update product stock
-                    $updateStmt = $db->prepare("
-                        UPDATE products 
-                        SET stock_quantity = stock_quantity - ?, 
-                            sold_count = sold_count + ?
+                    // Update variant stock if variant_id exists
+                if (!empty($item['variant_id'])) {
+                    $updateVariantStmt = $db->prepare("
+                        UPDATE product_variants 
+                        SET stock_quantity = stock_quantity - ? 
                         WHERE id = ?
                     ");
-                    $updateStmt->execute([$item['quantity'], $item['quantity'], $product['id']]);
+                    $updateVariantStmt->execute([$item['quantity'], $item['variant_id']]);
+                } else {
+                    // For products without variants (though with your structure, all should have variants)
+                    // Update product sold_count only
+                    $updateProductStmt = $db->prepare("
+                        UPDATE products 
+                        SET sold_count = sold_count + ? 
+                        WHERE id = ?
+                    ");
+                    $updateProductStmt->execute([$item['quantity'], $product['id']]);
+                }
                     
                     // ========== STOCK NOTIFICATION ==========
                     try {
                         // Calculate new stock
-                        $newStock = (int)$product['stock_quantity'] - (int)$item['quantity'];
-                        $minStock = (int)$product['min_stock_level'];
+                        // Calculate new stock
+                    $newStock = 0;
+                    if (!empty($item['variant_id'])) {
+                        // Get current variant stock
+                        $variantStmt = $db->prepare("SELECT stock_quantity FROM product_variants WHERE id = ?");
+                        $variantStmt->execute([$item['variant_id']]);
+                        $variant = $variantStmt->fetch();
+                        $newStock = (int)($variant['stock_quantity'] ?? 0);
+                    } else {
+                        // Get total variant stock for product
+                        $stockStmt = $db->prepare("SELECT SUM(stock_quantity) as total FROM product_variants WHERE product_id = ?");
+                        $stockStmt->execute([$product['id']]);
+                        $stockData = $stockStmt->fetch();
+                        $newStock = (int)($stockData['total'] ?? 0);
+                    }
+
+                    // Use default min stock level
+                    $minStock = 10; // Or get from product['min_stock_level'] if you added it back
                         
                         // Create stock notification
                         NotificationHelper::createStockNotification(

@@ -18,6 +18,7 @@ if (!$app->isLoggedIn() || !$app->isAdmin()) {
 }
 
 // Get dashboard stats
+// Get dashboard stats
 $stats = [
     'total_orders' => $db->query("SELECT COUNT(*) FROM orders")->fetchColumn(),
     'total_products' => $db->query("SELECT COUNT(*) FROM products WHERE is_active = 1")->fetchColumn(),
@@ -27,9 +28,25 @@ $stats = [
     'low_stock_products' => $db->query("
         SELECT COUNT(DISTINCT p.id) 
         FROM products p 
-        LEFT JOIN product_variants pv ON p.id = pv.product_id 
         WHERE p.is_active = 1 
-        AND (p.stock_quantity <= 10 OR pv.stock_quantity <= 10)
+        AND p.id IN (
+            SELECT pv.product_id 
+            FROM product_variants pv 
+            WHERE pv.stock_quantity <= 10 
+            AND pv.stock_quantity > 0
+            GROUP BY pv.product_id
+        )
+    ")->fetchColumn(),
+    'out_of_stock_products' => $db->query("
+        SELECT COUNT(DISTINCT p.id) 
+        FROM products p 
+        WHERE p.is_active = 1 
+        AND p.id IN (
+            SELECT pv.product_id 
+            FROM product_variants pv 
+            GROUP BY pv.product_id
+            HAVING SUM(pv.stock_quantity) = 0
+        )
     ")->fetchColumn(),
 ];
 
@@ -51,17 +68,21 @@ $recentOrders = $db->query("
     LIMIT 10
 ")->fetchAll();
 
-// Get top selling products
+// Get top selling products (variant-aware)
 $topProducts = $db->query("
     SELECT 
         p.id,
         p.name,
         p.slug,
         p.price,
-        p.stock_quantity,
         pi.image_url,
         COALESCE(SUM(oi.quantity), 0) as total_sold,
-        COALESCE(SUM(oi.total_price), 0) as revenue
+        COALESCE(SUM(oi.total_price), 0) as revenue,
+        COALESCE((
+            SELECT SUM(pv.stock_quantity)
+            FROM product_variants pv
+            WHERE pv.product_id = p.id
+        ), 0) as total_stock
     FROM products p
     LEFT JOIN product_images pi ON p.id = pi.product_id AND pi.is_primary = 1
     LEFT JOIN order_items oi ON p.id = oi.product_id
@@ -174,6 +195,9 @@ $content = '
                                 <span class="text-warning mr-2">
                                     <i class="fas fa-exclamation-triangle"></i> ' . $stats['low_stock_products'] . ' Low Stock
                                 </span>
+                                <span class="text-danger mr-2">
+                                    <i class="fas fa-times-circle"></i> ' . ($stats['out_of_stock_products'] ?? 0) . ' Out of Stock
+                                </span>
                             </div>
                         </div>
                         <div class="col-auto">
@@ -247,11 +271,12 @@ foreach ($topProducts as $product) {
                                     <td>
                                         <div class="d-flex align-items-center">
                                             <img src="' . SITE_URL . ($product['image_url'] ?: 'assets/images/placeholder.jpg') . '" 
-                                                 class="rounded me-2" 
-                                                 style="width: 30px; height: 30px; object-fit: cover;">
+                                                class="rounded me-2" 
+                                                style="width: 30px; height: 30px; object-fit: cover;">
                                             <div>
                                                 <small class="d-block">' . htmlspecialchars($product['name']) . '</small>
                                                 <small class="text-muted">Ksh ' . number_format($product['price'], 2) . '</small>
+                                                <small class="text-muted d-block">Stock: ' . ($product['total_stock'] ?? 'N/A') . '</small>
                                             </div>
                                         </div>
                                     </td>

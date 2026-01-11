@@ -29,7 +29,15 @@ $is_ajax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) &&
 error_log("AJAX Request to get-products.php: " . $_SERVER['REQUEST_URI']);
 error_log("Request Method: " . $_SERVER['REQUEST_METHOD']);
 error_log("Is AJAX: " . ($is_ajax ? 'Yes' : 'No'));
-
+/**
+ * Format price range for products with variants
+ */
+function formatPriceRange($minPrice, $maxPrice) {
+    if ($minPrice == $maxPrice) {
+        return 'Ksh ' . number_format($minPrice, 2);
+    }
+    return 'Ksh ' . number_format($minPrice, 2) . ' - Ksh ' . number_format($maxPrice, 2);
+}
 try {
     // Define SITE_URL - Use relative path to avoid absolute URL issues
     $site_url = '/linen-closet/';
@@ -92,19 +100,24 @@ try {
                 $db = Database::getInstance();
                 $pdo = $db->getConnection();
                 
-                $stmt = $pdo->prepare("
-                    SELECT 
-                        p.*,
-                        c.name as category_name,
-                        c.slug as category_slug,
-                        (SELECT image_url FROM product_images pi WHERE pi.product_id = p.id AND pi.is_primary = 1 LIMIT 1) as primary_image,
-                        (SELECT SUM(stock_quantity) FROM product_variants pv WHERE pv.product_id = p.id) as total_stock
-                    FROM products p
-                    LEFT JOIN categories c ON p.category_id = c.id
-                    WHERE p.id IN ($placeholders) AND p.is_active = 1
-                    ORDER BY FIELD(p.id, " . $placeholders . ")
-                    LIMIT 8
-                ");
+               $stmt = $pdo->prepare("
+                SELECT 
+                    p.*,
+                    c.name as category_name,
+                    c.slug as category_slug,
+                    b.name as brand_name,
+                    (SELECT image_url FROM product_images pi WHERE pi.product_id = p.id AND pi.is_primary = 1 LIMIT 1) as primary_image,
+                    COALESCE((SELECT SUM(pv.stock_quantity) FROM product_variants pv WHERE pv.product_id = p.id), 0) as total_stock,
+                    COALESCE((SELECT MIN(pv.price) FROM product_variants pv WHERE pv.product_id = p.id AND pv.stock_quantity > 0), p.price) as min_variant_price,
+                    COALESCE((SELECT MAX(pv.price) FROM product_variants pv WHERE pv.product_id = p.id AND pv.stock_quantity > 0), p.price) as max_variant_price,
+                    (SELECT COUNT(*) FROM product_variants pv WHERE pv.product_id = p.id) as variant_count
+                FROM products p
+                LEFT JOIN categories c ON p.category_id = c.id
+                LEFT JOIN brands b ON p.brand_id = b.id
+                WHERE p.id IN ($placeholders) AND p.is_active = 1
+                ORDER BY FIELD(p.id, " . $placeholders . ")
+                LIMIT 8
+            ");
                 
                 // Execute with IDs twice (for WHERE and ORDER BY FIELD)
                 $stmt->execute(array_merge($productIds, $productIds));
@@ -126,8 +139,14 @@ try {
                         'brand_id' => (int)($product['brand_id'] ?? 0),
                         'category' => $product['category_name'] ?? '',
                         'category_id' => (int)($product['category_id'] ?? 0),
-                        'stock_status' => ($product['total_stock'] > 0) ? 'in-stock' : 'out-of-stock',
                         'stock_quantity' => (int)$product['total_stock'],
+                        'has_variants' => ($product['variant_count'] > 0),
+                        'variant_count' => (int)$product['variant_count'],
+                        'price' => $product['variant_count'] > 0 ? formatPriceRange($product['min_variant_price'], $product['max_variant_price']) : 'Ksh ' . number_format($product['price'], 2),
+                        'price_numeric' => $product['variant_count'] > 0 ? (float)$product['min_variant_price'] : (float)$product['price'],
+                        'original_price' => isset($product['compare_price']) ? 'Ksh ' . number_format($product['compare_price'], 2) : null,
+                        'original_price_numeric' => isset($product['compare_price']) ? (float)$product['compare_price'] : null,
+                        
                         'description' => $product['description'] ?? '',
                         'short_description' => substr($product['description'] ?? '', 0, 100) . '...',
                         'rating' => (float)($product['rating'] ?? 0),

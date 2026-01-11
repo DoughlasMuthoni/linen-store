@@ -63,15 +63,19 @@ if (!empty($cart)) {
         // echo "Product IDs: " . print_r($productIds, true);
         // echo "Placeholders: " . $placeholders;
         
-        $stmt = $db->prepare("
-            SELECT 
-                p.*,
-                (SELECT image_url FROM product_images pi WHERE pi.product_id = p.id AND pi.is_primary = 1 LIMIT 1) as primary_image,
-                c.name as category_name
-            FROM products p
-            LEFT JOIN categories c ON p.category_id = c.id
-            WHERE p.id IN ($placeholders) AND p.is_active = 1
-        ");
+       $stmt = $db->prepare("
+        SELECT 
+            p.*,
+            (SELECT image_url FROM product_images pi WHERE pi.product_id = p.id AND pi.is_primary = 1 LIMIT 1) as primary_image,
+            c.name as category_name,
+            COALESCE(
+                (SELECT SUM(stock_quantity) FROM product_variants pv WHERE pv.product_id = p.id),
+                0
+            ) as total_variant_stock
+        FROM products p
+        LEFT JOIN categories c ON p.category_id = c.id
+        WHERE p.id IN ($placeholders) AND p.is_active = 1
+    ");
         
         // FIX: Ensure we pass the correct number of parameters
         $stmt->execute(array_values($productIds));  // Use array_values() to ensure proper array format
@@ -88,43 +92,58 @@ if (!empty($cart)) {
             $productId = $cartItem['product_id'] ?? null;
             
             if ($productId && isset($productsById[$productId])) {
-                $product = $productsById[$productId];
-                $quantity = $cartItem['quantity'] ?? 1;
-                $price = $cartItem['price'] ?? $product['price'];
-                $itemTotal = $price * $quantity;
-                
-                // Build variant description
-                $variantDescription = '';
-                $variantParts = [];
-                if (!empty($cartItem['size'])) {
-                    $variantParts[] = 'Size: ' . htmlspecialchars($cartItem['size']);
-                }
-                if (!empty($cartItem['color'])) {
-                    $variantParts[] = 'Color: ' . htmlspecialchars($cartItem['color']);
-                }
-                if (!empty($cartItem['material'])) {
-                    $variantParts[] = 'Material: ' . htmlspecialchars($cartItem['material']);
-                }
-                if (!empty($variantParts)) {
-                    $variantDescription = implode(' • ', $variantParts);
-                }
-                
-                $cartItems[] = [
-                    'cart_key' => $cartKey,
-                    'id' => $productId,
-                    'product' => $product,
-                    'quantity' => $quantity,
-                    'price' => $price,
-                    'total' => $itemTotal,
-                    'size' => $cartItem['size'] ?? null,
-                    'color' => $cartItem['color'] ?? null,
-                    'material' => $cartItem['material'] ?? null,
-                    'variant_description' => $variantDescription,
-                    'variant_id' => $cartItem['variant_id'] ?? null
-                ];
-                
-                $cartCount += $quantity;
-                $subtotal += $itemTotal;
+    $product = $productsById[$productId];
+    $quantity = $cartItem['quantity'] ?? 1;
+    $price = $cartItem['price'] ?? $product['price'];
+    $itemTotal = $price * $quantity;
+    
+    // Check stock availability
+    $stock = 0;
+    if (isset($cartItem['variant_id'])) {
+        // Get variant stock
+        $variantStmt = $db->prepare("SELECT stock_quantity FROM product_variants WHERE id = ?");
+        $variantStmt->execute([$cartItem['variant_id']]);
+        $variant = $variantStmt->fetch();
+        $stock = $variant['stock_quantity'] ?? 0;
+    } else {
+        // Get product stock (from variants sum)
+        $stock = $product['total_variant_stock'] ?? 0;
+    }
+    
+    // Build variant description
+    $variantDescription = '';
+    $variantParts = [];
+    if (!empty($cartItem['size'])) {
+        $variantParts[] = 'Size: ' . htmlspecialchars($cartItem['size']);
+    }
+    if (!empty($cartItem['color'])) {
+        $variantParts[] = 'Color: ' . htmlspecialchars($cartItem['color']);
+    }
+    if (!empty($cartItem['material'])) {
+        $variantParts[] = 'Material: ' . htmlspecialchars($cartItem['material']);
+    }
+    if (!empty($variantParts)) {
+        $variantDescription = implode(' • ', $variantParts);
+    }
+    
+    $cartItems[] = [
+        'cart_key' => $cartKey,
+        'id' => $productId,
+        'product' => $product,
+        'quantity' => $quantity,
+        'price' => $price,
+        'total' => $itemTotal,
+        'size' => $cartItem['size'] ?? null,
+        'color' => $cartItem['color'] ?? null,
+        'material' => $cartItem['material'] ?? null,
+        'variant_description' => $variantDescription,
+        'variant_id' => $cartItem['variant_id'] ?? null,
+        'stock_available' => $stock  // Add stock availability
+    ];
+    
+    $cartCount += $quantity;
+    $subtotal += $itemTotal;
+
             }
         }
         

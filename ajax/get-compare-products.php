@@ -46,14 +46,18 @@ try {
         SELECT 
             p.id,
             p.name,
-            p.price,
+            p.price as base_price,
             p.sku,
+            p.description,
             b.name as brand_name,
             c.name as category_name,
             (SELECT image_url FROM product_images pi WHERE pi.product_id = p.id AND pi.is_primary = 1 LIMIT 1) as image_url,
-            (SELECT GROUP_CONCAT(DISTINCT size) FROM product_variants pv WHERE pv.product_id = p.id AND pv.size IS NOT NULL) as available_sizes,
-            (SELECT GROUP_CONCAT(DISTINCT color) FROM product_variants pv WHERE pv.product_id = p.id AND pv.color IS NOT NULL) as available_colors,
-            (SELECT SUM(stock_quantity) FROM product_variants pv WHERE pv.product_id = p.id) as total_stock
+            (SELECT GROUP_CONCAT(DISTINCT pv.size) FROM product_variants pv WHERE pv.product_id = p.id AND pv.size IS NOT NULL AND pv.stock_quantity > 0) as available_sizes,
+            (SELECT GROUP_CONCAT(DISTINCT pv.color) FROM product_variants pv WHERE pv.product_id = p.id AND pv.color IS NOT NULL AND pv.stock_quantity > 0) as available_colors,
+            (SELECT SUM(pv.stock_quantity) FROM product_variants pv WHERE pv.product_id = p.id) as total_stock,
+            (SELECT COUNT(*) FROM product_variants pv WHERE pv.product_id = p.id) as variant_count,
+            COALESCE((SELECT MIN(pv.price) FROM product_variants pv WHERE pv.product_id = p.id AND pv.stock_quantity > 0), p.price) as min_price,
+            COALESCE((SELECT MAX(pv.price) FROM product_variants pv WHERE pv.product_id = p.id AND pv.stock_quantity > 0), p.price) as max_price
         FROM products p
         LEFT JOIN brands b ON p.brand_id = b.id
         LEFT JOIN categories c ON p.category_id = c.id
@@ -71,17 +75,50 @@ try {
     // Format products
     $formattedProducts = [];
     foreach ($products as $product) {
+        // Determine price display
+        $hasVariants = $product['variant_count'] > 0;
+        $minPrice = $product['min_price'];
+        $maxPrice = $product['max_price'];
+        
+        if ($hasVariants && $minPrice != $maxPrice) {
+            $priceDisplay = 'Ksh ' . number_format($minPrice, 2) . ' - Ksh ' . number_format($maxPrice, 2);
+        } else {
+            $priceDisplay = 'Ksh ' . number_format($minPrice, 2);
+        }
+        
+        // Parse available sizes and colors
+        $availableSizes = [];
+        $availableColors = [];
+        
+        if (!empty($product['available_sizes'])) {
+            $availableSizes = array_filter(array_map('trim', explode(',', $product['available_sizes'])));
+        }
+        
+        if (!empty($product['available_colors'])) {
+            $availableColors = array_filter(array_map('trim', explode(',', $product['available_colors'])));
+        }
+        
         $formattedProducts[] = [
             'id' => $product['id'],
             'name' => $product['name'],
-            'price' => 'Ksh ' . number_format($product['price'], 2),
-            'image' => !empty($product['image_url']) ? SITE_URL . $product['image_url'] : SITE_URL . 'assets/images/placeholder.jpg',
+            'price' => $priceDisplay,
+            'price_numeric' => (float)$minPrice,
+            'base_price' => (float)$product['base_price'],
+            'min_price' => (float)$minPrice,
+            'max_price' => (float)$maxPrice,
+            'image' => !empty($product['image_url']) 
+                ? (strpos($product['image_url'], 'http') === 0 ? $product['image_url'] : SITE_URL . ltrim($product['image_url'], '/'))
+                : SITE_URL . 'assets/images/placeholder.jpg',
             'brand' => $product['brand_name'] ?? 'Unknown Brand',
             'category' => $product['category_name'] ?? 'Uncategorized',
             'sku' => $product['sku'] ?? 'N/A',
-            'sizes' => !empty($product['available_sizes']) ? explode(',', $product['available_sizes']) : [],
-            'colors' => !empty($product['available_colors']) ? explode(',', $product['available_colors']) : [],
-            'stock' => $product['total_stock'] ?? 0
+            'description' => $product['description'] ?? '',
+            'sizes' => $availableSizes,
+            'colors' => $availableColors,
+            'stock' => (int)$product['total_stock'],
+            'has_variants' => $hasVariants,
+            'variant_count' => (int)$product['variant_count'],
+            'stock_status' => $product['total_stock'] > 0 ? 'In Stock' : 'Out of Stock'
         ];
     }
     

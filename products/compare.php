@@ -23,9 +23,12 @@ if (empty($productIds) || !is_array($productIds)) {
 // Limit to 4 products maximum
 $productIds = array_slice($productIds, 0, 4);
 
-// Fetch products to compare
 if (!empty($productIds)) {
     $placeholders = str_repeat('?,', count($productIds) - 1) . '?';
+    
+    // For ORDER BY FIELD we need placeholders again
+    $orderPlaceholders = str_repeat('?,', count($productIds) - 1) . '?';
+    
     $query = "
         SELECT 
             p.*,
@@ -33,20 +36,22 @@ if (!empty($productIds)) {
             b.logo_url as brand_logo,
             c.name as category_name,
             (SELECT image_url FROM product_images pi WHERE pi.product_id = p.id AND pi.is_primary = 1 LIMIT 1) as primary_image,
-            (SELECT GROUP_CONCAT(DISTINCT size) FROM product_variants pv WHERE pv.product_id = p.id AND pv.size IS NOT NULL) as available_sizes,
-            (SELECT GROUP_CONCAT(DISTINCT color) FROM product_variants pv WHERE pv.product_id = p.id AND pv.color IS NOT NULL) as available_colors,
+            (SELECT GROUP_CONCAT(DISTINCT size) FROM product_variants pv WHERE pv.product_id = p.id AND pv.size IS NOT NULL AND pv.stock_quantity > 0) as available_sizes,
+            (SELECT GROUP_CONCAT(DISTINCT color) FROM product_variants pv WHERE pv.product_id = p.id AND pv.color IS NOT NULL AND pv.stock_quantity > 0) as available_colors,
             (SELECT MIN(price) FROM product_variants pv WHERE pv.product_id = p.id AND pv.stock_quantity > 0) as min_variant_price,
             (SELECT MAX(price) FROM product_variants pv WHERE pv.product_id = p.id AND pv.stock_quantity > 0) as max_variant_price,
-            (SELECT SUM(stock_quantity) FROM product_variants pv WHERE pv.product_id = p.id) as total_stock,
+            COALESCE((SELECT SUM(stock_quantity) FROM product_variants pv WHERE pv.product_id = p.id), 0) as total_stock,
+            (SELECT COUNT(*) FROM product_variants pv WHERE pv.product_id = p.id) as variant_count,
             (SELECT AVG(rating) FROM product_reviews pr WHERE pr.product_id = p.id AND pr.is_approved = 1) as avg_rating,
             (SELECT COUNT(*) FROM product_reviews pr WHERE pr.product_id = p.id AND pr.is_approved = 1) as review_count
         FROM products p
         LEFT JOIN brands b ON p.brand_id = b.id
         LEFT JOIN categories c ON p.category_id = c.id
         WHERE p.id IN ($placeholders) AND p.is_active = 1
-        ORDER BY FIELD(p.id, " . $placeholders . ")
+        ORDER BY FIELD(p.id, $orderPlaceholders)
     ";
     
+    // Merge parameters: first for WHERE, then for ORDER BY
     $params = array_merge($productIds, $productIds);
     $stmt = $pdo->prepare($query);
     $stmt->execute($params);
@@ -183,12 +188,14 @@ function renderStars($rating) {
                                         </div>
                                         <?php endif; ?>
                                         
-                                        <!-- Price -->
                                         <div class="text-primary fw-bold fs-4 mb-3">
                                             <?php 
-                                            if ($product['min_variant_price'] && $product['max_variant_price'] 
+                                            $hasVariants = $product['variant_count'] > 0;
+                                            if ($hasVariants && $product['min_variant_price'] && $product['max_variant_price'] 
                                                 && $product['min_variant_price'] != $product['max_variant_price']) {
                                                 echo formatPrice($product['min_variant_price']) . ' - ' . formatPrice($product['max_variant_price']);
+                                            } else if ($hasVariants && $product['min_variant_price']) {
+                                                echo formatPrice($product['min_variant_price']);
                                             } else {
                                                 echo formatPrice($product['price']);
                                             }
@@ -374,8 +381,10 @@ function renderStars($rating) {
                                 <td class="fw-bold">Stock Status</td>
                                 <?php foreach ($products as $product): ?>
                                 <td class="text-center">
-                                    <?php 
+                                   <?php 
                                     $stock = $product['total_stock'] ?? 0;
+                                    // Ensure it's a number
+                                    $stock = is_numeric($stock) ? (int)$stock : 0;
                                     if ($stock <= 0): ?>
                                         <span class="badge bg-danger px-3 py-2">
                                             <i class="fas fa-times me-1"></i>Out of Stock
@@ -745,17 +754,22 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // Remove from compare (also update localStorage)
-    function removeFromCompare(productId) {
-        // Update localStorage
-        let compareProducts = JSON.parse(localStorage.getItem('compareProducts') || '[]');
-        compareProducts = compareProducts.filter(id => id != productId);
-        localStorage.setItem('compareProducts', JSON.stringify(compareProducts));
-        
-        // Update cookie
-        document.cookie = `compare_products=${JSON.stringify(compareProducts)}; path=/`;
-    }
+   // Remove from compare (also update localStorage)
+function removeFromCompare(productId) {
+    // Update localStorage
+    let compareProducts = JSON.parse(localStorage.getItem('compareProducts') || '[]');
+    compareProducts = compareProducts.filter(id => parseInt(id) != parseInt(productId));
+    localStorage.setItem('compareProducts', JSON.stringify(compareProducts));
     
+    // Update cookie
+    document.cookie = `compare_products=${JSON.stringify(compareProducts)}; path=/; max-age=${60*60*24*30}`;
+    
+    // Also update any compare buttons on the page
+    document.querySelectorAll(`.compare-btn[data-product-id="${productId}"]`).forEach(btn => {
+        btn.querySelector('i').className = 'fas fa-exchange-alt';
+        btn.classList.remove('text-primary');
+    });
+}
     // Show toast notification
     function showToast(message, type = 'success') {
         // Create toast if it doesn't exist

@@ -259,14 +259,14 @@ require_once __DIR__ . '/../includes/header.php';
                 
                 <!-- Product Actions -->
                 <div class="d-flex gap-2 mt-4">
-                    <button type="button" class="btn btn-outline-dark btn-lg flex-fill">
-                        <i class="far fa-heart me-2"></i> Add to Wishlist
+                    <button type="button" class="btn btn-outline-primary btn-lg flex-fill">
+                        <i class="far fa-heart me-1"></i> Add to Wishlist
                     </button>
-                    <button type="button" class="btn btn-outline-dark btn-lg flex-fill">
-                        <i class="fas fa-share-alt me-2"></i> Share
+                    <button type="button" class="btn btn-outline-primary btn-lg flex-fill">
+                        <i class="fas fa-share-alt me-1"></i> Share
                     </button>
-                    <button type="button" class="btn btn-outline-dark btn-lg flex-fill">
-                        <i class="fas fa-flag me-2"></i> Report
+                    <button type="button" class="btn btn-outline-primary btn-lg flex-fill">
+                        <i class="fas fa-flag me-1"></i> Report
                     </button>
                 </div>
             </div>
@@ -384,7 +384,7 @@ require_once __DIR__ . '/../includes/header.php';
                                                    class="d-none variant-option"
                                                    <?php echo !$sizeInStock ? 'disabled' : ''; ?>
                                                    data-type="size">
-                                            <div class="size-btn btn <?php echo $sizeInStock ? 'btn-outline-dark' : 'btn-outline-secondary'; ?>">
+                                            <div class="size-btn btn <?php echo $sizeInStock ? 'btn-outline-primary' : 'btn-outline-secondary'; ?>">
                                                 <?php echo htmlspecialchars($size); ?>
                                                 <?php if (!$sizeInStock): ?>
                                                     <span class="position-absolute top-0 end-0 small text-danger">×</span>
@@ -464,7 +464,7 @@ require_once __DIR__ . '/../includes/header.php';
                     <div class="mb-4">
                         <label class="form-label fw-bold">Quantity</label>
                         <div class="quantity-selector d-flex align-items-center" style="max-width: 150px;">
-                            <button type="button" class="btn btn-outline-dark" id="decreaseQty">
+                            <button type="button" class="btn btn-outline-primary" id="decreaseQty">
                                 <i class="fas fa-minus"></i>
                             </button>
                             <input type="number" 
@@ -474,7 +474,7 @@ require_once __DIR__ . '/../includes/header.php';
                                    value="1" 
                                    min="1" 
                                    max="100">
-                            <button type="button" class="btn btn-outline-dark" id="increaseQty">
+                            <button type="button" class="btn btn-outline-primary" id="increaseQty">
                                 <i class="fas fa-plus"></i>
                             </button>
                         </div>
@@ -489,14 +489,14 @@ require_once __DIR__ . '/../includes/header.php';
                     <!-- Add to Cart & Buy Now -->
                     <div class="d-flex gap-3 mb-4">
                         <button type="button" 
-                                class="btn btn-dark btn-lg flex-fill py-3 add-to-cart-btn"
+                                class="btn btn-primary btn-lg flex-fill py-2 add-to-cart-btn"
                                 data-product-id="<?php echo $product['id']; ?>"
                                 <?php echo ($totalStock <= 0) ? 'disabled' : ''; ?>>
                             <i class="fas fa-shopping-cart me-2"></i>
                             <?php echo ($totalStock <= 0) ? 'Out of Stock' : 'Add to Cart'; ?>
                         </button>
                         <button type="button" 
-                                class="btn btn-outline-dark btn-lg flex-fill py-3 buy-now-btn"
+                                class="btn btn-outline-primary btn-lg flex-fill py-2 buy-now-btn"
                                 data-product-id="<?php echo $product['id']; ?>"
                                 <?php echo ($totalStock <= 0) ? 'disabled' : ''; ?>>
                             <i class="fas fa-bolt me-2"></i> Buy Now
@@ -505,13 +505,13 @@ require_once __DIR__ . '/../includes/header.php';
                     
                     <!-- Product Actions -->
                     <div class="d-flex gap-2 mb-4">
-                        <button type="button" class="btn btn-outline-dark">
+                        <button type="button" class="btn btn-outline-primary">
                             <i class="fas fa-sync-alt me-2"></i> Compare
                         </button>
-                        <button type="button" class="btn btn-outline-dark">
+                        <button type="button" class="btn btn-outline-primary">
                             <i class="fas fa-truck me-2"></i> Shipping Info
                         </button>
-                        <button type="button" class="btn btn-outline-dark">
+                        <button type="button" class="btn btn-outline-primary">
                             <i class="fas fa-shield-alt me-2"></i> Warranty
                         </button>
                     </div>
@@ -772,7 +772,7 @@ require_once __DIR__ . '/../includes/header.php';
                     
                     <!-- Write Review Button -->
                     <div class="text-center mt-4">
-                        <button class="btn btn-outline-dark" data-bs-toggle="modal" data-bs-target="#writeReviewModal">
+                        <button class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#writeReviewModal">
                             <i class="fas fa-pen me-2"></i> Write a Review
                         </button>
                     </div>
@@ -924,7 +924,7 @@ require_once __DIR__ . '/../includes/header.php';
                 <div class="d-flex justify-content-between align-items-center mb-4">
                     <h2 class="fw-bold">Related Products</h2>
                     <a href="<?php echo SITE_URL; ?>products?category=<?php echo $product['category_slug']; ?>" 
-                       class="btn btn-outline-dark">
+                       class="btn btn-outline-primary">
                         View All <i class="fas fa-arrow-right ms-2"></i>
                     </a>
                 </div>
@@ -966,7 +966,7 @@ require_once __DIR__ . '/../includes/header.php';
                                         <h5 class="text-dark mb-0">Ksh <?php echo number_format($related['price'], 2); ?></h5>
                                         <?php if ($relatedStock > 0): ?>
                                             <button type="button" 
-                                                    class="btn btn-sm btn-outline-dark add-to-cart-btn"
+                                                    class="btn btn-sm btn-outline-primary add-to-cart-btn"
                                                     data-product-id="<?php echo $related['id']; ?>">
                                                 <i class="fas fa-cart-plus"></i>
                                             </button>
@@ -1019,7 +1019,7 @@ require_once __DIR__ . '/../includes/header.php';
                     </div>
                     
                     <div class="modal-footer border-0">
-                        <button type="button" class="btn btn-outline-dark" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-outline-primary" data-bs-dismiss="modal">Cancel</button>
                         <button type="submit" class="btn btn-dark" id="submitReview">Submit Review</button>
                     </div>
                 </form>
@@ -1286,12 +1286,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (sizeOption) {
                         document.querySelectorAll('.size-option .size-btn').forEach(btn => {
                             btn.classList.remove('btn-dark', 'text-white');
-                            btn.classList.add('btn-outline-dark');
+                            btn.classList.add('btn-outline-primary');
                         });
                         
                         const sizeBtn = sizeOption.querySelector('.size-btn');
                         if (sizeBtn) {
-                            sizeBtn.classList.remove('btn-outline-dark');
+                            sizeBtn.classList.remove('btn-outline-primary');
                             sizeBtn.classList.add('btn-dark', 'text-white');
                         }
                     }
@@ -1705,12 +1705,12 @@ function highlightCorrespondingVariant(variantId, variantInfo) {
                 if (sizeOption) {
                     document.querySelectorAll('.size-option .size-btn').forEach(btn => {
                         btn.classList.remove('btn-dark', 'text-white');
-                        btn.classList.add('btn-outline-dark');
+                        btn.classList.add('btn-outline-primary');
                     });
                     
                     const sizeBtn = sizeOption.querySelector('.size-btn');
                     if (sizeBtn) {
-                        sizeBtn.classList.remove('btn-outline-dark');
+                        sizeBtn.classList.remove('btn-outline-primary');
                         sizeBtn.classList.add('btn-dark', 'text-white');
                     }
                 }
@@ -1795,7 +1795,7 @@ function showImageVariantInfo(variantId, variantInfo) {
         // Reset visual selections
         document.querySelectorAll('.size-option .size-btn').forEach(btn => {
             btn.classList.remove('btn-dark', 'text-white');
-            btn.classList.add('btn-outline-dark');
+            btn.classList.add('btn-outline-primary');
         });
         
         document.querySelectorAll('.color-option .color-btn').forEach(btn => {

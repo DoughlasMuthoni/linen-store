@@ -381,13 +381,20 @@ class Email {
                 </ul>
                 
                 <!-- Track Order Button -->
-                <div style="text-align: center; margin: 40px 0;">
-                    <a href="' . $siteUrl . 'orders/track.php?order_number=' . htmlspecialchars($order['order_number'] ?? '') . '" 
-                    class="action-button" 
-                    target="_blank">
-                        <i class="fas fa-truck" style="margin-right: 8px;"></i> Track Your Order
-                    </a>
-                </div>
+<div style="text-align: center; margin: 40px 0;">
+    <a href="' . $siteUrl . 'orders/track.php?order_id=' . ($order['id'] ?? '') . '" 
+    class="action-button" 
+    target="_blank"
+    style="text-decoration: none; color: white !important;">
+        <i class="fas fa-truck" style="margin-right: 8px;"></i> Track Your Order
+    </a>
+    <p style="margin-top: 15px; font-size: 14px; color: #666;">
+        Can\'t click the button? Copy this link:<br>
+        <code style="background: #f8f9fa; padding: 5px 10px; border-radius: 4px;">
+            ' . $siteUrl . 'orders/track.php?order_id=' . ($order['id'] ?? '') . '
+        </code>
+    </p>
+</div>
                 
                 <!-- Contact Information -->
                 <div class="contact-info">

@@ -77,13 +77,29 @@ $category = $_GET['category'] ?? '';
 $status = $_GET['status'] ?? '';
 
 // Build query
+// Build query - UPDATED FOR YOUR STRUCTURE
 $query = "
     SELECT 
         p.*,
         c.name as category_name,
         b.name as brand_name,
         (SELECT image_url FROM product_images pi WHERE pi.product_id = p.id AND pi.is_primary = 1 LIMIT 1) as primary_image,
-        (SELECT SUM(stock_quantity) FROM product_variants pv WHERE pv.product_id = p.id) as total_stock
+        COALESCE((
+            SELECT SUM(pv.stock_quantity) 
+            FROM product_variants pv 
+            WHERE pv.product_id = p.id
+        ), 0) as total_stock,
+        COALESCE((
+            SELECT COUNT(pv.id)
+            FROM product_variants pv 
+            WHERE pv.product_id = p.id
+        ), 0) as variant_count,
+        COALESCE((
+            SELECT GROUP_CONCAT(CONCAT(pv.size, ':', pv.color) SEPARATOR ', ')
+            FROM product_variants pv 
+            WHERE pv.product_id = p.id
+            LIMIT 3
+        ), 'No variants') as variant_info
     FROM products p
     LEFT JOIN categories c ON p.category_id = c.id
     LEFT JOIN brands b ON p.brand_id = b.id
@@ -226,19 +242,35 @@ $content .= '
                         </tr>
                     </thead>
                     <tbody>';
+
 if (count($products) > 0) {
     foreach ($products as $product) {
-        $stockClass = '';
-        $stockText = $product['total_stock'] ?: $product['stock_quantity'];
+        // Calculate stock from variants only
+        $variantStock = (int)($product['total_stock'] ?? 0);
+        $variantCount = (int)($product['variant_count'] ?? 0);
         
-        if ($stockText <= 0) {
+        $stockClass = '';
+        $stockText = '';
+        
+        if ($variantCount === 0) {
+            // Product has no variants yet
+            $stockClass = 'secondary';
+            $stockText = 'No Variants';
+        } elseif ($variantStock <= 0) {
             $stockClass = 'danger';
             $stockText = 'Out of Stock';
-        } elseif ($stockText <= 10) {
+        } elseif ($variantStock <= 10) {
             $stockClass = 'warning';
-            $stockText = $stockText . ' (Low)';
+            $stockText = $variantStock . ' (Low)';
         } else {
             $stockClass = 'success';
+            $stockText = $variantStock;
+        }
+        
+        // Add variant count badge
+        $variantBadge = '';
+        if ($variantCount > 0) {
+            $variantBadge = ' <span class="badge bg-info" title="' . htmlspecialchars($product['variant_info'] ?? '') . '">' . $variantCount . ' vars</span>';
         }
         
         $content .= '
@@ -267,7 +299,10 @@ if (count($products) > 0) {
         $content .= '
                             </td>
                             <td>
-                                <span class="badge bg-' . $stockClass . '">' . $stockText . '</span>
+                                <div class="d-flex align-items-center gap-1">
+                                    <span class="badge bg-' . $stockClass . '">' . $stockText . '</span>
+                                    ' . $variantBadge . '
+                                </div>
                             </td>
                             <td>
                                 <span class="badge bg-' . ($product['is_active'] ? 'success' : 'secondary') . '">

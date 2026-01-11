@@ -142,7 +142,7 @@ require_once 'includes/header.php';
                     <div class="carousel-inner">
                         <div class="carousel-item active">
                             <div class="hero-slide bg-primary text-white p-5">
-                                <div class="container">
+                                <div class="container-fluid px-0">
                                     <div class="row align-items-center">
                                         <div class="col-md-7">
                                             <h1 class="display-4 fw-bold mb-3">Summer Linen Sale</h1>
@@ -160,7 +160,7 @@ require_once 'includes/header.php';
                         </div>
                         <div class="carousel-item">
                             <div class="hero-slide bg-dark text-white p-5">
-                                <div class="container">
+                                <div class="container-fluid px-0">
                                     <div class="row align-items-center">
                                         <div class="col-md-7">
                                             <h1 class="display-4 fw-bold mb-3">New Arrivals</h1>
@@ -222,7 +222,7 @@ require_once 'includes/header.php';
         </div>
     </div>
 
-   <div class="container mb-5">
+   <div class="container-fluid mb-5">
     <div class="section-header bg-danger text-white p-3 rounded-top mb-0">
         <div class="d-flex justify-content-between align-items-center">
             <h3 class="fw-bold mb-0">Today's Deals</h3>
@@ -402,7 +402,7 @@ require_once 'includes/header.php';
     </div>
 </div>
 <!-- Best Sellers Section -->
-<div class="container mb-5">
+<div class="container-fluid mb-5">
     <div class="section-header bg-white p-3 border rounded-top mb-0">
         <div class="d-flex justify-content-between align-items-center">
             <h3 class="fw-bold mb-0">Best Sellers</h3>
@@ -558,7 +558,7 @@ require_once 'includes/header.php';
 </div>
 
    <!-- Categories Section -->
-<div class="container mb-5">
+<div class="container-fluid mb-5">
     <div class="section-header bg-white p-3 border rounded-top mb-0">
         <div class="d-flex justify-content-between align-items-center">
             <h3 class="fw-bold mb-0">Shop by Category</h3>
@@ -1130,6 +1130,50 @@ require_once 'includes/header.php';
     .category-card:active {
         background-color: #f9f9f9;
     }
+}
+/* Remove margins on homepage */
+.container-fluid.px-0 {
+    padding: 8 !important;
+    margin: 8 !important;
+   
+}
+
+/* Remove container padding */
+.container.px-0 {
+    padding-left: 8 !important;
+    padding-right: 8 !important;
+}
+
+/* Make sections full width */
+.amazon-hero-section .container,
+section .container,
+div.container {
+    max-width: 100% !important;
+    padding-left: 8 !important;
+    padding-right: 8 !important;
+}
+
+/* Make sure rows don't have gutters */
+.row.g-0 {
+    margin-left: 8 !important;
+    margin-right: 8 !important;
+}
+
+/* Remove padding from columns */
+.row.g-0 > [class*='col-'] {
+    padding-left: 8 !important;
+    padding-right: 8 !important;
+}
+
+/* Hero section full width */
+.hero-banner .container {
+    max-width: 100% !important;
+    padding: 0 15px !important; /* Keep some padding for content */
+}
+
+/* Amazon hero section */
+.amazon-hero-section .container {
+    max-width: 100% !important;
 }
 </style>
 

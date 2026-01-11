@@ -16,6 +16,15 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+// NEW: Check if user is logged in when coming from email link
+if (isset($_GET['order_id']) && !isset($_SESSION['user_id'])) {
+    // Store the order_id in session to redirect back after login
+    $_SESSION['redirect_after_login'] = SITE_URL . 'orders/track.php?order_id=' . $_GET['order_id'];
+    
+    // Redirect to login page
+    header('Location: ' . SITE_URL . 'auth/login.php?redirect=track');
+    exit();
+}
 $pageTitle = "Track Your Order";
 $order = null;
 $trackingData = null;
@@ -63,35 +72,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 } elseif (isset($_GET['order_id'])) {
-    // Direct link from confirmation page
+    // Direct link from confirmation page or email
     $orderId = intval($_GET['order_id']);
     
     try {
-        $stmt = $db->prepare("
-            SELECT o.*, u.email as user_email,
-                   CONCAT(u.first_name, ' ', u.last_name) as customer_name
-            FROM orders o
-            INNER JOIN users u ON o.user_id = u.id
-            WHERE o.id = ?
-        ");
-        $stmt->execute([$orderId]);
+        // Check if user is logged in
+        if (isset($_SESSION['user_id'])) {
+            // User is logged in - verify they own this order
+            $stmt = $db->prepare("
+                SELECT o.*, u.email as user_email,
+                       CONCAT(u.first_name, ' ', u.last_name) as customer_name
+                FROM orders o
+                INNER JOIN users u ON o.user_id = u.id
+                WHERE o.id = ? AND o.user_id = ?
+            ");
+            $stmt->execute([$orderId, $_SESSION['user_id']]);
+        } else {
+            // User is not logged in - show login prompt or use temporary session
+            $_SESSION['temp_order_id'] = $orderId;
+            
+            // Try to get order without user verification for display
+            $stmt = $db->prepare("
+                SELECT o.*, '' as user_email, 'Guest Customer' as customer_name
+                FROM orders o
+                WHERE o.id = ?
+            ");
+            $stmt->execute([$orderId]);
+        }
+        
         $order = $stmt->fetch(PDO::FETCH_ASSOC);
         
         if ($order) {
-            // Fetch order items
-            $itemsStmt = $db->prepare("
-                SELECT oi.*, p.name as product_name
-                FROM order_items oi
-                LEFT JOIN products p ON oi.product_id = p.id
-                WHERE oi.order_id = ?
-            ");
-            $itemsStmt->execute([$order['id']]);
-            $orderItems = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
-            
-            $trackingData = generateTrackingData($order);
+            // If user is not logged in but we have the order, ask them to login
+            if (!isset($_SESSION['user_id'])) {
+                $_SESSION['redirect_after_login'] = SITE_URL . 'orders/track.php?order_id=' . $orderId;
+                // Don't show detailed info until logged in
+                $error = 'Please login to view your order details.';
+            } else {
+                // User is logged in and verified - show full details
+                // Fetch order items
+                $itemsStmt = $db->prepare("
+                    SELECT oi.*, p.name as product_name
+                    FROM order_items oi
+                    LEFT JOIN products p ON oi.product_id = p.id
+                    WHERE oi.order_id = ?
+                ");
+                $itemsStmt->execute([$order['id']]);
+                $orderItems = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+                
+                $trackingData = generateTrackingData($order);
+            }
+        } else {
+            $error = 'Order not found or you do not have permission to view this order.';
         }
     } catch (Exception $e) {
         error_log("Track order by ID error: " . $e->getMessage());
+        $error = 'An error occurred while fetching your order.';
     }
 }
 

@@ -5,7 +5,24 @@
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
+// ========== INCLUDE NOTIFICATION HELPER ==========
+// Adjust the path based on your folder structure
+$notificationHelperPath = dirname(__DIR__) . '/includes/NotificationHelper.php';
 
+if (file_exists($notificationHelperPath)) {
+    require_once $notificationHelperPath;
+} else {
+    // Try alternative path
+    $notificationHelperPath = __DIR__ . '/../includes/NotificationHelper.php';
+    if (file_exists($notificationHelperPath)) {
+        require_once $notificationHelperPath;
+    } else {
+        // Log error but don't break registration
+        error_log("ERROR: NotificationHelper.php not found! Searched in: " . 
+                 dirname(__DIR__) . '/includes/NotificationHelper.php and ' . 
+                 __DIR__ . '/../includes/NotificationHelper.php');
+    }
+}
 // Check if user is already logged in
 if ($app->isLoggedIn()) {
     $app->redirect('/'); // Redirect to home if already logged in

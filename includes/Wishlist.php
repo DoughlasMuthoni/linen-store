@@ -151,63 +151,71 @@ class Wishlist {
      * Get wishlist items
      */
     public function getItems() {
-        $items = [];
-        
-        // Get from database if user is logged in
-        if ($this->userId) {
-            try {
-                $stmt = $this->db->prepare("
-                    SELECT product_id 
-                    FROM user_wishlists 
-                    WHERE user_id = ? AND is_active = 1
-                    ORDER BY created_at DESC
-                ");
-                $stmt->execute([$this->userId]);
-                $dbItems = $stmt->fetchAll(PDO::FETCH_COLUMN);
-                
-                // Update session with database items
-                $_SESSION['wishlist'] = $dbItems;
-                $items = $dbItems;
-                
-            } catch (Exception $e) {
-                error_log("Wishlist get items error: " . $e->getMessage());
-                // Fallback to session
-                $items = $_SESSION['wishlist'] ?? [];
-            }
-        } else {
-            // Use session for non-logged in users
-            $items = $_SESSION['wishlist'] ?? [];
-        }
-        
-        // If no items, return empty array
-        if (empty($items)) {
-            return [];
-        }
-        
-        // Get product details
-        $placeholders = str_repeat('?,', count($items) - 1) . '?';
-        
+    $items = [];
+    
+    // Get from database if user is logged in
+    if ($this->userId) {
         try {
             $stmt = $this->db->prepare("
-                SELECT 
-                    p.*,
-                    c.name as category_name,
-                    c.slug as category_slug,
-                    (SELECT image_url FROM product_images pi WHERE pi.product_id = p.id AND pi.is_primary = 1 LIMIT 1) as primary_image,
-                    COALESCE(p.price, 0) as display_price
-                FROM products p
-                LEFT JOIN categories c ON p.category_id = c.id
-                WHERE p.id IN ($placeholders) AND p.is_active = 1
-                ORDER BY FIELD(p.id, " . implode(',', $items) . ")
+                SELECT product_id 
+                FROM user_wishlists 
+                WHERE user_id = ? AND is_active = 1
+                ORDER BY created_at DESC
             ");
-            $stmt->execute($items);
-            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $stmt->execute([$this->userId]);
+            $dbItems = $stmt->fetchAll(PDO::FETCH_COLUMN);
+            
+            // Update session with database items
+            $_SESSION['wishlist'] = $dbItems;
+            $items = $dbItems;
             
         } catch (Exception $e) {
-            error_log("Wishlist products error: " . $e->getMessage());
-            return [];
+            error_log("Wishlist get items error: " . $e->getMessage());
+            // Fallback to session
+            $items = $_SESSION['wishlist'] ?? [];
         }
+    } else {
+        // Use session for non-logged in users
+        $items = $_SESSION['wishlist'] ?? [];
     }
+    
+    // If no items, return empty array
+    if (empty($items)) {
+        return [];
+    }
+    
+    // Get product details WITH VARIANT STOCK
+    $placeholders = str_repeat('?,', count($items) - 1) . '?';
+    
+    try {
+        $stmt = $this->db->prepare("
+            SELECT 
+                p.*,
+                c.name as category_name,
+                c.slug as category_slug,
+                b.name as brand_name,
+                (SELECT image_url FROM product_images pi WHERE pi.product_id = p.id AND pi.is_primary = 1 LIMIT 1) as primary_image,
+                COALESCE(p.price, 0) as display_price,
+                COALESCE(p.compare_price, 0) as compare_price,
+                COALESCE((SELECT SUM(pv.stock_quantity) FROM product_variants pv WHERE pv.product_id = p.id), 0) as total_variant_stock,
+                COALESCE((SELECT MIN(pv.price) FROM product_variants pv WHERE pv.product_id = p.id AND pv.stock_quantity > 0), p.price) as variant_min_price,
+                COALESCE((SELECT MAX(pv.price) FROM product_variants pv WHERE pv.product_id = p.id AND pv.stock_quantity > 0), p.price) as variant_max_price,
+                (SELECT COUNT(*) FROM product_variants pv WHERE pv.product_id = p.id) as variant_count,
+                COALESCE((SELECT MIN(pv.price) FROM product_variants pv WHERE pv.product_id = p.id AND pv.stock_quantity > 0), p.price) as display_price_updated
+            FROM products p
+            LEFT JOIN categories c ON p.category_id = c.id
+            LEFT JOIN brands b ON p.brand_id = b.id
+            WHERE p.id IN ($placeholders) AND p.is_active = 1
+            ORDER BY FIELD(p.id, " . implode(',', $items) . ")
+        ");
+        $stmt->execute($items);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+    } catch (Exception $e) {
+        error_log("Wishlist products error: " . $e->getMessage());
+        return [];
+    }
+}
     
     /**
      * Get wishlist count
